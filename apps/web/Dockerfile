@@ -29,6 +29,7 @@ COPY packages/documents/package.json packages/documents/package.json
 COPY packages/jobs/package.json packages/jobs/package.json
 COPY packages/storage/package.json packages/storage/package.json
 COPY packages/integrations/spira/package.json packages/integrations/spira/package.json
+COPY packages/integrations/llm/package.json packages/integrations/llm/package.json
 RUN bun install --frozen-lockfile || bun install
 
 COPY packages/core packages/core
@@ -37,6 +38,7 @@ COPY packages/documents packages/documents
 COPY packages/jobs packages/jobs
 COPY packages/storage packages/storage
 COPY packages/integrations/spira packages/integrations/spira
+COPY packages/integrations/llm packages/integrations/llm
 COPY apps/web apps/web
 
 WORKDIR /repo/apps/web

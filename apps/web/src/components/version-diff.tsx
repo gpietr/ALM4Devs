@@ -1,18 +1,7 @@
 "use client";
 
 import { diffWords } from "diff";
-
-/** Rough plain-text approximation for diffing purposes only - background is rich HTML
- * (tables/images survive in the real rendered view elsewhere), but a redline diff over
- * markup would just be full of tag noise. Good enough to show what changed, not meant to
- * be a faithful re-render. */
-function stripHtmlForDiff(html: string): string {
-  return html
-    .replace(/<\/(p|li|div|h[1-6]|br|tr)\s*>/gi, "$& ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+import { htmlToPlainText } from "@/lib/text-diff";
 
 function DiffText({ oldText, newText }: { oldText: string; newText: string }) {
   if (oldText === newText) {
@@ -72,8 +61,8 @@ export function VersionDiff({ before, after }: { before: DiffableVersion | null;
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Background</p>
           <DiffText
-            oldText={stripHtmlForDiff(before.background ?? "")}
-            newText={stripHtmlForDiff(after.background ?? "")}
+            oldText={htmlToPlainText(before.background ?? "")}
+            newText={htmlToPlainText(after.background ?? "")}
           />
         </div>
       )}

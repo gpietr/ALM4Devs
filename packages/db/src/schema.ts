@@ -526,6 +526,27 @@ export const spiraConnections = pgTable("spira_connections", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// One row per tenant, same shape/trust-boundary reasoning as spiraConnections above
+// (plaintext key, no KMS layer) - lets each tenant bring their own LLM provider/key for
+// AI-assisted test step drafting rather than this app committing to one vendor. `model`
+// is a plain string, not an enum - providers add/rename models faster than this app could
+// keep a matching list in sync. `baseUrl` is only meaningful (and required, enforced in
+// packages/core/src/llm-connection.ts, not here) for provider 'openai_compatible' - a
+// self-hosted or third-party OpenAI-compatible endpoint (Ollama, vLLM, Groq, Together,
+// DeepSeek, etc); 'anthropic'/'openai' use each provider SDK's own default endpoint.
+export const llmConnections = pgTable("llm_connections", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  // CHECK-constrained in migrations-manual (see 012_llm_connections_constraints_and_rls.sql):
+  // 'anthropic' | 'openai' | 'openai_compatible'.
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  baseUrl: text("base_url"),
+  apiKey: text("api_key").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // Generic "this local entity came from that external system" mapping - deliberately not
 // specific to Spira, so a future integration (e.g. Jira, backlog item 8, which also wants
 // bidirectional sync) reuses this table rather than growing its own copy per integration.

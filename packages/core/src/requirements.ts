@@ -1,5 +1,5 @@
 import { type TenantTx, schema } from "@galm/db";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { writeAuditLog } from "./audit";
 import { type CustomFieldValueInput, setCustomFieldValues } from "./custom-fields";
 import { DomainError } from "./errors";
@@ -537,4 +537,38 @@ export async function deleteRequirement(db: TenantTx, tenantId: string, requirem
     entityId: requirementId,
     payload: { displayId, title: currentVersion.title, numberReclaimed: reclaimed },
   });
+}
+
+/** How many full-text requirements to hand an LLM as context for AI-assisted test step
+ * drafting - already a large prompt at this size for an early-stage tool's product-level
+ * requirement counts. Deterministic first-N (by the same level/title order the rest of
+ * the app shows requirements in) rather than any "most relevant" selection - simple and
+ * predictable beats clever here; both this number and the truncation strategy are cheap
+ * to tune later if a real deployment needs more. */
+export const LLM_STEP_SUGGESTION_REQUIREMENT_LIMIT = 300;
+
+/** Not exposed as its own tRPC query - only consumed server-side by
+ * testCases.suggestSteps (see apps/web/src/server/routers/test-cases.ts) to give the
+ * model full requirement text (title/description/background/safety classification) to
+ * act on, not just the id/title pair requirements.listAllByProduct returns for the
+ * existing requirement-picker UI. */
+export async function listRequirementsForStepSuggestions(db: TenantTx, tenantId: string, productId: string) {
+  const rows = await db
+    .select({
+      id: schema.requirements.id,
+      sequenceNumber: schema.requirements.sequenceNumber,
+      levelCode: schema.levels.code,
+      safetyClassification: schema.requirements.safetyClassification,
+      title: schema.requirementVersions.title,
+      description: schema.requirementVersions.description,
+      background: schema.requirementVersions.background,
+    })
+    .from(schema.requirements)
+    .innerJoin(schema.requirementVersions, eq(schema.requirements.currentVersionId, schema.requirementVersions.id))
+    .innerJoin(schema.levels, eq(schema.requirements.levelId, schema.levels.id))
+    .where(and(eq(schema.requirements.tenantId, tenantId), eq(schema.requirements.productId, productId)))
+    .orderBy(asc(schema.levels.sortOrder), asc(schema.requirementVersions.title))
+    .limit(LLM_STEP_SUGGESTION_REQUIREMENT_LIMIT + 1);
+  const truncated = rows.length > LLM_STEP_SUGGESTION_REQUIREMENT_LIMIT;
+  return { requirements: rows.slice(0, LLM_STEP_SUGGESTION_REQUIREMENT_LIMIT), truncated };
 }

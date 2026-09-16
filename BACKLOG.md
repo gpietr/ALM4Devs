@@ -1268,6 +1268,323 @@ add its own coverage there rather than relying on manual `curl`/browser verifica
   overcorrect and silently swallow that one. `bun run typecheck` clean, full Docker
   rebuild, all 75 e2e tests pass (unchanged - no server-side behavior changed).
 
+- [x] **9.37. AI-assisted test step drafting** — "add some LLM-assisted features, e.g.
+  help writing test steps... specific workflow: 1. user tells agent what to do... 2. the
+  agent proposes changes 3. user can refine or accept." A chat-style "Draft with AI"
+  button on the Steps section of both test-case pages: type an instruction, the model
+  proposes a step list shown as a color-coded diff against what's in the editor, and you
+  refine (same conversation) or accept (replaces the editor's step list - nothing
+  persists until the page's own Save).
+  - **Provider-agnostic, no Vercel account**: the open-source Vercel AI SDK (`ai` +
+    `@ai-sdk/anthropic`/`openai`/`openai-compatible`) resolves a tenant's saved
+    connection to an explicit provider instance and calls that provider's own API
+    directly with the tenant's own key - "OpenAI-compatible" covers self-hosted (Ollama,
+    vLLM) or third-party (Groq, Together, DeepSeek) endpoints via a custom base URL.
+    `generateObject` with a Zod schema, not prose-parsing.
+  - **Credentials**: new per-tenant `llm_connections` table (Settings → AI connection),
+    mirroring `spira_connections` exactly (key never echoed back, empty key on re-save
+    keeps the existing one, plaintext storage - same documented trust boundary as every
+    other credential here).
+  - **New package** `packages/integrations/llm`: `resolveModel`, the step-suggestion
+    schema/prompt builder, `proposeStepChanges`/`pingModel`. No `@galm/db` dependency and
+    never imported client-side - `step-diff.ts` declares its own small matching
+    `ProposedStep` type instead, same duplicate-the-shape convention as `@galm/documents`.
+  - The diff is computed **client-side from real content comparison** (by client-
+    generated step `key`), never trusted from what the model claims about its own edit.
+    Baseline is fixed for the whole dialog session.
+  - **Security gap found and fixed while building this**: an unaccepted proposal renders
+    directly via `RichTextView`, which assumes safe input - but the model's HTML never
+    passes through the app's sanitize-on-write path until accepted. Fixed by sanitizing
+    every proposed step server-side, inside `suggestSteps`, before the response reaches
+    the browser.
+  - `suggestSteps` never writes to `test_steps` - verified directly against Postgres,
+    not just by reading the code.
+  - **No real LLM calls in tests**: `resolveModel` has a doubly-gated escape hatch
+    (sentinel `baseUrl` + `ALLOW_MOCK_LLM_PROVIDER=1`, dev/CI only) returning a fake
+    `ai/test` model that parses the real baseline step's key back out of its own prompt,
+    so tests exercise a genuine "unchanged" row, not just "added". Invisible to the
+    production surface - no `"mock"` provider value in the DB CHECK or settings UI.
+
+  **Verified**: `bun run typecheck` clean across all packages; full Docker rebuild;
+  migration applied and confirmed via `\d llm_connections` against the live container;
+  e2e suite (81 tests, 6 new) covers no-connection-yet, key never echoed/kept on empty
+  re-save, `testConnection` against the mock, a well-shaped proposal writing nothing to
+  `test_steps`, a mock failure returning `{error}` not a 500, and cross-tenant RLS. A
+  real-browser Playwright script (one-off) drove the actual UI: opened the dialog,
+  submitted an instruction, confirmed the diff, accepted, saved, and confirmed via a
+  follow-up API call both steps persisted. Whether a *real* provider's suggestions are
+  good isn't something automation can assert.
+
+- [x] **9.38. Fix: the AI-assist result modal overflowed the window with no way to
+  scroll** — "the result modal overflows the window, doesn't scroll - I can't see
+  anything :D". Root cause wasn't specific to this dialog: the shared `DialogContent`
+  primitive had no height cap or scroll handling at all - every other dialog just never
+  had enough content to expose it.
+  - Fixed once at the shared component: content now scrolls in its own `flex-1 min-h-0
+    overflow-y-auto` box, a sibling of the close button (which stays pinned in the
+    corner). A first attempt (`grid` + `overflow-hidden` on the outer popup) looked
+    right, but a real-browser check showed nothing was actually scrollable -
+    `min-height: auto` let the inner box grow past its track instead of being
+    constrained. Caught by measuring `scrollHeight`/`clientHeight` for real, not by
+    reading the CSS.
+
+  **Verified**: a real headless-browser script (Playwright, one-off) confirmed against a
+  genuinely overflow-prone case: the content box has real scroll height, the dialog
+  itself never exceeds the viewport, scrolling moves `scrollTop`, and the close button
+  stays visible. A second script confirmed a normal short dialog is unaffected. `bun run
+  typecheck` clean, full Docker rebuild, all 81 e2e tests pass.
+
+- [x] **9.39. AI tools moved from a modal to a collapsible side panel, with a real
+  before/after diff** — "I'd like the diff view to show before-after. Maybe a
+  collapsible 'AI tools' side-panel would be better?" Agreed: a real before/after and an
+  ongoing chat both want more room than a small modal, and a modal hides the page you're
+  comparing against. `TestStepAssistButton`'s modal replaced by `AiToolsPanel`, a
+  collapsed-by-default `<aside>` next to the Steps editor, `sticky` so it tracks
+  scrolling with the page.
+  - A `modified` row now renders two columns (Before struck-through / After);
+    `added`/`removed`/`unchanged` stay single-column. New mock branch
+    `__mock_modify_step__` echoes a real step's key with different content so this is
+    exercised for real, not with an invented key.
+  - Collapsing is a CSS `hidden` toggle on the body, not an unmount - the chat/proposal
+    state lives in the always-mounted parent, so collapsing mid-conversation loses
+    nothing.
+  - Both test-case pages widened (`max-w-6xl`) and restructured into a flex row (form
+    flex-1, panel a fixed-width sibling); sections that don't need the width stay at
+    their original `max-w-4xl`.
+
+  **Verified**: a Playwright script (one-off) confirmed the panel starts collapsed with
+  the step editor still visible underneath (not a modal covering the page), the modify
+  branch renders real Before/After content, and accepting updates the real editor
+  without closing anything. A new e2e test covers the modify branch at the HTTP layer.
+  `bun run typecheck` clean, full Docker rebuild, all 82 e2e tests pass.
+
+- [x] **9.40. AI tools panel: overlay instead of in-flow, resizable, and its state
+  persists** — "I'd prefer a collapsible panel on top of contents... user can decide how
+  wide it is." Follow-up to 9.39: that panel was still in the page's own layout flow,
+  widening both test-case pages. `AiToolsPanel` is now `position: fixed` to the right
+  edge, floating on top of the page - it never resizes or reflows, and both pages went
+  back to their original widths.
+  - Collapsed state is a small fixed tab at the right edge; expanding doesn't change
+    anything else on the page.
+  - User-resizable via a pointer-driven drag handle (not HTML5 drag-and-drop), clamped
+    320-800px.
+  - Open/closed and width persist per-device via `localStorage` (`ai-panel-prefs.ts`),
+    matching `last-location.ts`'s try/catch-wrapped convention.
+  - `z-[41]` - above the edit page's Save/Discard bar (`z-40`), below the `z-50`
+    dialogs/dropdowns used everywhere else.
+
+  **Verified**: a Playwright script confirmed `<main>`'s measured width is identical
+  before/after expanding (the page genuinely doesn't reflow), the resize handle grows
+  the panel by the dragged amount, and both open state and width survive a real page
+  reload. `bun run typecheck` clean, full Docker rebuild, all 82 e2e tests pass
+  (client-side layout change only, no server behavior changed).
+
+- [x] **9.41. Fix: real steps were showing as "modified" in the diff when nothing had
+  actually changed** — "the diff shows some steps as modified, when they haven't changed
+  at all." Root cause: `diffProposedSteps` compares HTML strings, and a model asked to
+  "copy this step verbatim" never reproduces the exact bytes - it re-encodes `&`, writes
+  `<br/>` for `<br>`, straightens quotes, rewraps whitespace. None of that is a real
+  change.
+  - `normalizeHtml` now also decodes common entities, treats `<br>`/`<br/>`/`<hr>`/
+    `<img>` variants as the same tag, straightens curly quotes, and trims whitespace
+    just inside the outermost tag - on top of the existing between-tags collapse.
+    `purpose` gets the same whitespace normalization.
+  - Deliberately still string/regex-based, not real HTML-equivalence checking (attribute
+    reordering isn't handled) - targets specifically the reformatting an LLM tends to
+    introduce, not every possible rewrite. Checked directly that this doesn't start
+    treating real changes (a word swap, a purpose change, a requirement-link change) as
+    unchanged too.
+
+  **Verified**: an ad-hoc script ran the candidate normalizer against 11 realistic
+  before/after pairs, catching a real regression in the first draft (it dropped the
+  existing between-tags collapse). More durably: this is the project's first frontend
+  unit test (`step-diff.test.ts`, Bun's own runner) - 16 tests covering every
+  false-positive case plus the "still detects a real change" cases, not wired into
+  `typecheck`/e2e (both stay HTTP/DB-focused), run directly. `bun run typecheck` clean,
+  full Docker rebuild, all 82 e2e tests pass.
+
+- [x] **9.42. AI step drafting: delta output instead of the full step list every turn**
+  — "It uses a lot of tokens - would it be limited if it didn't output the full list?
+  just added/modified?" `suggestSteps`'s response is now a delta - `{ summary, upserts:
+  [new/changed steps], removedKeys }` - merged back into the full list client-side
+  (`applyStepDelta`) for free, no LLM involved. A one-step edit on a 20-step case no
+  longer means regenerating all 20.
+  - Since an untouched step is now never regenerated, it can no longer pick up the
+    reformatting drift that caused 9.41's false-positive "modified" bug - impossible now
+    for any step the response doesn't mention, not just harder to trigger.
+  - **Trade-off accepted, not hidden**: the delta contract carries no ordering signal -
+    a modified step keeps its position, a new one appends at the end. Free-form
+    AI-driven reordering no longer works (manual up/down still does) - judged acceptable
+    since reordering was never a first-class diff feature anyway.
+  - A new step gets a real key the moment it's merged in, not just at final Accept -
+    needed so a refinement turn can refer back to a step this turn just added.
+  - The mock's branches were made atomic (one delta operation each) instead of every
+    branch also adding an unrelated step - a carryover from the old full-list design.
+  - Deferred, not forgotten: prompt caching, capping resent history, on-demand
+    requirement fetching instead of sending up to 300 every turn.
+
+  **Verified**: a real two-turn Playwright conversation against a 3-step case initially
+  failed its own assertion - not the app, but the mock's old "every branch also adds a
+  step" habit, which is what prompted making it atomic. After the fix: turn 1 showed
+  exactly 1 added + 3 unchanged; turn 2's refinement showed 1 modified with a real
+  rendered diff, proving the new-step-gets-a-key mechanism holds across turns. 6 new
+  unit tests, 2 new e2e tests. `bun run typecheck` clean, full Docker rebuild, all 83
+  e2e tests pass, all 22 unit tests pass.
+
+- [x] **9.43. Fix: inserted steps landed at the end instead of where asked; step numbers
+  now shown in the diff** — "it added 2 steps in the middle, but they ended up at the
+  end. Also make sure step number is in the diff." Direct fallout from 9.42's flagged
+  trade-off: the delta contract had no way to say *where* a new step should go.
+  - `stepSuggestionResultSchema` gained an optional `order`: the complete final key
+    sequence, with a `null` placeholder per new step. Omitted for the common case (pure
+    content edit). `applyStepDelta` honors it without trusting it blindly - an unknown
+    key is skipped, a step `order` forgot about is appended at the end rather than
+    dropped.
+  - `diffProposedSteps` now computes `position`/`originalPosition` per row. The panel
+    shows "Step N", "Was step N" for removed rows, and "Step N (was M)" whenever a kept
+    step's position shifted - visible even when its content didn't change.
+
+  **Verified**: unit tests cover `order` handling (placement, reordering, unknown keys,
+  forgotten steps, interaction with `removedKeys`) and the new position fields. A new
+  e2e test drives the mock's `__mock_insert_middle__` branch. A Playwright script ran
+  the actual reported scenario end to end - correct step numbers in the diff, correct
+  position after Accept, and confirmed via a follow-up API call that Save persisted that
+  exact order. `bun run typecheck` clean, full Docker rebuild, all 84 e2e tests pass,
+  all 31 unit tests pass.
+
+- [x] **9.44. Fix: a hallucinated requirement id broke every AI request after the one
+  that introduced it** — "when asking for second edit in the AI box I'm getting [...]
+  Invalid uuid [...] path: originalSteps, 30, requirementIds". Nothing validated that a
+  model-proposed `requirementId` was actually real; a hallucinated one flowed through
+  `acceptProposal` into the editor state and from there into every subsequent request's
+  `originalSteps` (which requires real uuids) - so the request that introduced it
+  succeeded, but every one after it failed. Would have broken Save the same way.
+  - **Server-side**: `suggestSteps` now strips any unreal `requirementId` before the
+    response reaches the client, alongside the existing HTML sanitization. "Real" is the
+    union of the AI's context list *and* whatever ids were already linked on the input
+    steps - not the context list alone, since it's capped at 300 and an edit to an
+    already-linked step outside that cap must survive.
+  - **Client-side, defense-in-depth**: the same filter (`filterKnownRequirementIds`) is
+    applied wherever a step's existing requirementIds get read back out - a step the AI
+    never touches passes through every merge unmodified, so the server-side fix alone
+    doesn't clean up an id already sitting in a step from before this fix existed.
+
+  **Verified**: mock branch `__mock_hallucinate_requirement__` reproduces this without a
+  real model misbehaving on cue. Two new e2e tests (stripped server-side; a real
+  already-linked id is never mistaken for hallucinated - the beyond-300-cap edge case is
+  an honest documented gap, too expensive to seed for e2e). Four new unit tests. A
+  Playwright script reproduced the user's exact sequence: trigger the hallucination,
+  accept, submit a second request - previously a Zod error, now clean. `bun run
+  typecheck` clean, full Docker rebuild, all 86 e2e tests pass, all 35 unit tests pass.
+
+- [x] **9.45. Fix: the whole app had horizontal scroll on narrow screens - unrelated to
+  the AI panel work** — "my page is too wide now, I've got horizontal scroll wherever I
+  am." Investigated broadly given "wherever I am" - swept scroll-overflow measurements
+  across every route at several widths, with the AI panel both collapsed and expanded.
+  Zero overflow anywhere the panel appears - it was never the cause. The real culprit:
+  `TopBar`, rendered on every authenticated page.
+  - Root cause: the breadcrumb-style left content (product switcher, level toggle,
+    dropdown) had no width containment - a flex item's `min-width: auto` refuses to
+    shrink below its content. On a narrow screen that content alone exceeds the
+    viewport, growing the whole page and pushing the avatar/settings icons off-screen.
+  - Fixed the same way as 9.38: contain it with internal scroll instead of letting it
+    grow the page - `min-w-0 flex-1 overflow-x-auto` on the left content, `shrink-0` on
+    the corner.
+
+  **Verified**: Playwright scripts measured `scrollWidth` vs `clientWidth` across 14
+  routes at three widths - reproduced real overflow (up to 141px) before the fix on
+  several pages with no AI panel, zero overflow after. A follow-up confirmed the
+  breadcrumb content (429px in 286px of space at 390px) now scrolls internally rather
+  than pushing the page, with the settings icon staying on-screen. `bun run typecheck`
+  clean, full Docker rebuild, all 86 e2e tests still pass.
+
+- [x] **9.46. Fix: "horizontal scroll wherever I am" on a large screen turned out not to
+  be a layout bug at all** — direct follow-up to 9.45: "something is obviously wrong
+  even on a large laptop screen I get horizontal scroll and everything is spread too
+  wide!"
+  - Re-swept 9.45's overflow measurements across every route at 1440-1920px, panel
+    collapsed/expanded/max-width/persisted-and-reloaded, long content, real SPA
+    navigation - zero overflow anywhere.
+  - Had the user run a live diagnostic on their own real pages checking for any element
+    with real scrollable width in both directions - came back with nothing but a few
+    cosmetically-negligible pixels, nowhere near enough to explain "actually moving and
+    revealing real content," which ruled out my initial guess (the gray-box browser
+    back/forward preview).
+  - Actual cause: Chrome's own swipe-to-navigate-back/forward gesture - on some
+    platforms it renders as the page sliding to reveal the real previous/next page in
+    history, visually indistinguishable from a layout bug but nothing to do with this
+    app's layout. This app never opted out (`overscroll-behavior-x: none` on `body`);
+    many sites do, specifically to avoid this confusion. Fixed by adding it.
+  - Left open, not assumed away: whether "before the AI sidebar it was fine" reflects an
+    actual change or just when the user started noticing - nothing about the sidebar
+    touches scroll behavior, and the missing CSS property predates it.
+
+  **Verified**: `getComputedStyle(document.body).overscrollBehaviorX === "none"`
+  confirmed on every route against the real rebuilt stack. Honestly bounded: Playwright
+  can't simulate a real native trackpad gesture (it lives in the browser/OS input layer
+  below the DOM), so the CSS is confirmed applied but whether it resolves the user's
+  specific sensation needs their own confirmation. `bun run typecheck` clean, full
+  Docker rebuild, all 86 e2e tests still pass.
+
+- [x] **9.47. AI diff: a real git-style inline diff instead of Before/After columns** —
+  "can you make the diff more git-like? Highlighting specific characters
+  added/removed/changed." A "modified" row used to show the whole field twice; nothing
+  pointed at what actually changed, and a one-word fix looked the same as a rewrite.
+  Replaced with one inline line per field - unchanged text plain, removed struck
+  through, added highlighted - the same visual language `git diff --word-diff`/GitHub
+  use, at character granularity per what was asked (a typo fix highlights just the
+  changed letters, not the whole word).
+  - New `diff` (jsdiff) dependency, via `diffChars`. `expectedResult` and (when changed)
+    `purpose` get the same treatment as `description`.
+  - Diffs plain text, not raw HTML - character-diffing markup could split a segment
+    across a tag boundary, unrenderable as valid HTML. New `text-diff.ts` strips
+    tags/decodes entities (regex-based, not `document`-based, so it stays testable under
+    Bun's DOM-less runner) before diffing - later consolidated with the pre-existing
+    `version-diff.tsx` redline feature's identical stripping logic into one shared
+    `htmlToPlainText`.
+  - Mock branch `__mock_typo_fix__` echoes the real description with a small appended
+    suffix, not a wholesale swap - without it, every mock-driven "modified" test would
+    only exercise the "two completely different strings" case, not what actually proves
+    the diff highlights *specifically* what changed.
+
+  **Verified**: 12 unit tests in `text-diff.test.ts` (identical text unchanged, a word
+  swap highlights only those words, a typo fix highlights fewer characters than the
+  whole word with an explicit round-trip reconstruction check, entities decode before
+  diffing, adjacent HTML blocks don't run together). A new e2e test drives
+  `__mock_typo_fix__`. A Playwright script confirmed the old Before/After labels are
+  gone, the row reads as one continuous line, and the highlighted span contains exactly
+  the appended text and nothing struck through. `bun run typecheck` clean, full Docker
+  rebuild, all 87 e2e tests pass, 47 unit tests pass across both diff test files.
+
+- [x] **9.48. Pre-commit cleanup of the AI-assist work (9.37-9.47), and a real bug found
+  along the way** — "get ready for commit. Cleanup useless comments, redundant code,
+  excess text from documentation." Trimmed verbose inline comments across the feature's
+  files, condensed this span of BACKLOG.md/TECH_STACK.md toward the project's usual
+  house style, and consolidated `text-diff.ts`'s HTML-stripping with the pre-existing
+  `version-diff.tsx` redline feature's own (until-now duplicate) copy into one shared,
+  exported `htmlToPlainText` - fixing a real bug in the process: the new copy was
+  missing a space between adjacent block elements (`<p>A</p><p>B</p>` → "AB" instead of
+  "A B").
+  - **Real, previously-unreported bug found while reviewing, not by a user report**:
+    `AiToolsPanel` collapsed via a conditional `return` choosing between the small tab
+    button and the full `<aside>` - which unmounts `AiStepAssistBody` (and its
+    in-progress chat/proposal `useState`) every time the panel collapses, silently
+    discarding any pending AI conversation. The component's own docstring claimed
+    otherwise (a `hidden`-toggle, not an unmount) - a regression from 9.40's rewrite that
+    was never re-checked against this specific claim. Fixed by keeping both branches
+    mounted in a fragment, toggled via the native `hidden` attribute.
+  - Also removed `StepSide`'s now-fully-unused `label` prop (dead since 9.39's
+    Before/After columns were replaced by 9.47's inline diff) and a stale orphaned
+    docstring left over from that same change.
+
+  **Verified**: `bun run typecheck` clean across all packages; full Docker rebuild; all
+  87 e2e tests and all 47 unit tests (35 step-diff + 12 text-diff) still pass, confirming
+  the cleanup itself introduced no regression. The panel-collapse fix was additionally
+  verified with a dedicated Playwright script (one-off): generated a proposal, collapsed
+  the panel via its own collapse button, confirmed the `<aside>` was hidden, re-expanded
+  via the "AI tools" tab, and confirmed the pending proposal and Accept button were still
+  there - PASS.
+
 - [ ] **10. Self-host packaging** — finalize `docker-compose.yml` for external users (env
   templating, first-run setup docs), confirm the three-service topology holds up outside the
   dev environment.

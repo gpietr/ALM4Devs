@@ -8,6 +8,7 @@ export * from "./external-links";
 export * from "./item-id";
 export * from "./level-sequences";
 export * from "./levels";
+export * from "./llm-connection";
 export * from "./requirement-levels";
 export * from "./requirement-status";
 export * from "./requirements";

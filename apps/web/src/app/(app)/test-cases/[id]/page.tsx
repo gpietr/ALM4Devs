@@ -11,6 +11,7 @@ import {
 } from "@/components/custom-fields";
 import { BulkGenerateDocumentButton } from "@/components/bulk-generate-document-button";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
+import { AiToolsPanel } from "@/components/ai-tools-panel";
 import { RequirementPicker } from "@/components/requirement-picker";
 import { ResultBadge } from "@/components/result-badge";
 import { emptyStep, type StepDraft, TestStepsEditor } from "@/components/test-steps-editor";
@@ -210,6 +211,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       </div>
 
       <form
+        className="mt-4 space-y-6"
         onSubmit={(e) => {
           e.preventDefault();
           updateTestCase.mutate({
@@ -226,7 +228,6 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
             })),
           });
         }}
-        className="mt-4 space-y-6"
       >
         <p className="font-mono text-xs font-semibold text-primary">{formatItemId(testCase.levelCode, testCase.sequenceNumber)}</p>
         <div className="flex gap-3">
@@ -443,6 +444,15 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
         </div>
       )}
       </main>
+
+      <AiToolsPanel
+        productId={testCase.productId}
+        testCaseTitle={title}
+        testType={testType}
+        steps={steps}
+        onAccept={setSteps}
+        requirementOptions={requirementOptions.data ?? []}
+      />
     </>
   );
 }

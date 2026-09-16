@@ -113,6 +113,17 @@ export default function SettingsPage() {
       </section>
 
       <section className="mt-8">
+        <h2 className="text-sm font-medium text-foreground">AI-assisted test step drafting</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Bring your own API key for Anthropic, OpenAI, or any OpenAI-compatible endpoint
+          (self-hosted or third-party) to draft and revise test steps by chatting with it.
+        </p>
+        <Link href="/settings/ai" className={buttonVariants({ variant: "outline", className: "mt-3" })}>
+          Set up AI connection →
+        </Link>
+      </section>
+
+      <section className="mt-8">
         <h2 className="text-sm font-medium text-foreground">Import from a 3rd-party tool</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           One-time import of requirements and test cases from Spira. Not something you do

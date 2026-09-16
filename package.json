@@ -9,7 +9,7 @@
     "scripts"
   ],
   "scripts": {
-    "typecheck": "for d in packages/db packages/storage packages/jobs packages/documents packages/core packages/integrations/spira apps/web apps/worker scripts tests; do echo \"--- $d ---\"; (cd $d && bunx tsc --noEmit -p tsconfig.json) || exit 1; done",
+    "typecheck": "for d in packages/db packages/storage packages/jobs packages/documents packages/core packages/integrations/spira packages/integrations/llm apps/web apps/worker scripts tests; do echo \"--- $d ---\"; (cd $d && bunx tsc --noEmit -p tsconfig.json) || exit 1; done",
     "test:e2e": "bun test tests/e2e.test.ts",
     "db:generate": "cd packages/db && bunx drizzle-kit generate",
     "db:migrate": "bun run --filter=@galm/db migrate",

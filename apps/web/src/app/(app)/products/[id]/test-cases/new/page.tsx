@@ -7,6 +7,7 @@ import {
   CustomFieldInputs,
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
+import { AiToolsPanel } from "@/components/ai-tools-panel";
 import { RequirementPicker } from "@/components/requirement-picker";
 import { emptyStep, TestStepsEditor } from "@/components/test-steps-editor";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
       <h1 className="text-xl font-semibold tracking-tight">New test case</h1>
 
       <form
+        className="mt-6 space-y-6"
         onSubmit={(e) => {
           e.preventDefault();
           createTestCase.mutate(
@@ -65,7 +67,6 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
             },
           );
         }}
-        className="mt-6 space-y-6"
       >
         <div className="flex gap-3">
           <Select value={levelId} onValueChange={(v) => setLevelId(v ?? "")}>
@@ -122,6 +123,15 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
         </Button>
       </form>
       </main>
+
+      <AiToolsPanel
+        productId={productId}
+        testCaseTitle={title}
+        testType={testType}
+        steps={steps}
+        onAccept={setSteps}
+        requirementOptions={requirementOptions.data ?? []}
+      />
     </>
   );
 }

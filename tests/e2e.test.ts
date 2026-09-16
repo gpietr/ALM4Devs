@@ -2223,3 +2223,362 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     expect(result.zipBytes).toBeUndefined();
   });
 });
+
+describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
+  // A real connection can never legitimately have this base URL - it's the one and only
+  // trigger for resolveModel's test-only fake model (see packages/integrations/llm/src/
+  // resolve-model.ts), and only fires when ALLOW_MOCK_LLM_PROVIDER=1 is also set in the
+  // running stack's environment (see .env - dev/CI only). Lets this whole feature be
+  // exercised over real HTTP against the real DB without ever calling a real, paid LLM.
+  const MOCK_BASE_URL = "mock://step-suggestions";
+
+  async function saveMockConnection(tenant: TestTenant) {
+    const res = await rpc(tenant.cookie, "POST", "llm.saveConnection", {
+      provider: "openai_compatible",
+      model: "mock-model",
+      baseUrl: MOCK_BASE_URL,
+      apiKey: "dummy-key-for-testing",
+    });
+    expect(res.ok).toBe(true);
+  }
+
+  test("no connection saved yet: getConnection is null and suggestSteps returns an error, not a thrown one", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const got = await rpc(tenant.cookie, "GET", "llm.getConnection");
+    expect(got.data).toBeNull();
+
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      originalSteps: [],
+      history: [],
+      instruction: "draft a step",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toContain("no AI connection saved yet");
+    expect(result.data.upserts).toBeUndefined();
+  });
+
+  test("saving a connection never echoes the API key back, and an empty key on re-save keeps the existing one", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+
+    const first = await rpc(tenant.cookie, "GET", "llm.getConnection");
+    expect(first.data).toMatchObject({ provider: "openai_compatible", model: "mock-model", baseUrl: MOCK_BASE_URL, hasApiKey: true });
+    expect(first.data.apiKey).toBeUndefined();
+
+    // Re-save with a different model and no apiKey - should keep the previously-saved key
+    // (verified indirectly: the connection still works afterward, in the next test) rather
+    // than fail with "an API key is required".
+    const resaved = await rpc(tenant.cookie, "POST", "llm.saveConnection", {
+      provider: "openai_compatible",
+      model: "mock-model-v2",
+      baseUrl: MOCK_BASE_URL,
+    });
+    expect(resaved.ok).toBe(true);
+
+    const second = await rpc(tenant.cookie, "GET", "llm.getConnection");
+    expect(second.data.model).toBe("mock-model-v2");
+    expect(second.data.hasApiKey).toBe(true);
+  });
+
+  test("testConnection succeeds against the mock provider", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const result = await rpc(tenant.cookie, "POST", "llm.testConnection");
+    expect(result.ok).toBe(true);
+    expect(result.data.ok).toBe(true);
+  });
+
+  test("suggestSteps against the mock connection returns a well-shaped proposal and persists nothing", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId: product.data.id,
+      levelId: testLevel.id,
+      testType: "verification",
+      title: "TC",
+      steps: [{ description: "<p>Existing step</p>", expectedResult: "<p>OK</p>" }],
+    });
+    const testCaseId = testCase.data.testCase.id;
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const [{ count: beforeCount }] = await sql`select count(*)::int as count from test_steps where test_case_id = ${testCaseId}`;
+
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      testCaseTitle: "TC",
+      testType: "verification",
+      originalSteps: testCase.data.steps.map((s: any) => ({
+        key: s.id,
+        description: s.description,
+        expectedResult: s.expectedResult,
+        purpose: s.purpose ?? undefined,
+        requirementIds: [],
+      })),
+      history: [],
+      instruction: "add a step",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeUndefined();
+    expect(typeof result.data.summary).toBe("string");
+    expect(Array.isArray(result.data.upserts)).toBe(true);
+    expect(result.data.upserts.length).toBeGreaterThan(0);
+    expect(Array.isArray(result.data.removedKeys)).toBe(true);
+    // Delta, not a full list - "add a step" with two pre-existing untouched steps must
+    // not re-list either of them.
+    expect(result.data.upserts.length).toBe(1);
+    for (const step of result.data.upserts) {
+      expect(typeof step.description).toBe("string");
+      expect(typeof step.expectedResult).toBe("string");
+    }
+
+    const [{ count: afterCount }] = await sql`select count(*)::int as count from test_steps where test_case_id = ${testCaseId}`;
+    await sql.close();
+    // This mutation only ever stages a proposal client-side - it must never write to
+    // test_steps itself, regardless of what the model returns.
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  test("a mock-triggered failure comes back as an error field, never an HTTP 500", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      originalSteps: [],
+      history: [],
+      instruction: "__mock_force_error__ please fail",
+    });
+    expect(result.status).toBe(200);
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeTruthy();
+    expect(result.data.upserts).toBeUndefined();
+  });
+
+  test("the mock's __mock_modify_step__ branch echoes the real step's key with new content, for a genuine 'modified' diff row", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId: product.data.id,
+      levelId: testLevel.id,
+      testType: "verification",
+      title: "TC",
+      steps: [{ description: "<p>Original step</p>", expectedResult: "<p>Original result</p>" }],
+    });
+    const originalStepId = testCase.data.steps[0].id;
+
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      originalSteps: testCase.data.steps.map((s: any) => ({
+        key: s.id,
+        description: s.description,
+        expectedResult: s.expectedResult,
+      })),
+      history: [],
+      instruction: "__mock_modify_step__ please reword the first step",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeUndefined();
+    // Same key as the original step - this is what makes diffProposedSteps classify it
+    // as "modified" (matched key, different content), not "added" (unmatched key).
+    const modified = result.data.upserts.find((s: any) => s.key === originalStepId);
+    expect(modified).toBeDefined();
+    expect(modified.description).not.toBe("<p>Original step</p>");
+    // Atomic - a modify instruction only modifies, it doesn't also silently add an
+    // unrelated step (see resolve-model.ts's mock docstring on why branches are
+    // mutually exclusive since the delta redesign, backlog item 9.42).
+    expect(result.data.upserts).toHaveLength(1);
+    expect(result.data.removedKeys).toEqual([]);
+  });
+
+  test("the mock's __mock_remove_step__ branch puts the real step's key in removedKeys, not in upserts - a genuine delta removal", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId: product.data.id,
+      levelId: testLevel.id,
+      testType: "verification",
+      title: "TC",
+      steps: [{ description: "<p>Step to remove</p>", expectedResult: "<p>OK</p>" }],
+    });
+    const originalStepId = testCase.data.steps[0].id;
+
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      originalSteps: testCase.data.steps.map((s: any) => ({
+        key: s.id,
+        description: s.description,
+        expectedResult: s.expectedResult,
+      })),
+      history: [],
+      instruction: "__mock_remove_step__ please drop the redundant step",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeUndefined();
+    expect(result.data.removedKeys).toEqual([originalStepId]);
+    // The removed step's real key must not also show up as something to upsert - a
+    // step is either removed or changed, never both in the same response. Also atomic
+    // in the other direction: a remove instruction doesn't also silently add a step.
+    expect(result.data.upserts.some((s: any) => s.key === originalStepId)).toBe(false);
+    expect(result.data.upserts).toEqual([]);
+  });
+
+  test("the mock's __mock_typo_fix__ branch echoes real content with a small change, for a genuinely character-level diff (backlog item 9.47)", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId: product.data.id,
+      levelId: testLevel.id,
+      testType: "verification",
+      title: "TC",
+      steps: [{ description: "<p>Enter valid credentials</p>", expectedResult: "<p>Login succeeds</p>" }],
+    });
+    const originalStepId = testCase.data.steps[0].id;
+
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      originalSteps: testCase.data.steps.map((s: any) => ({
+        key: s.id,
+        description: s.description,
+        expectedResult: s.expectedResult,
+      })),
+      history: [],
+      instruction: "__mock_typo_fix__ please tighten the wording slightly",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeUndefined();
+    const modified = result.data.upserts.find((s: any) => s.key === originalStepId);
+    expect(modified).toBeDefined();
+    // Real original text, plus a small appended suffix - not swapped wholesale (that's
+    // what __mock_modify_step__ is for) - so a real client-side character diff against
+    // the original has something small and specific to highlight, not one giant
+    // removed+added chunk.
+    expect(modified.description).toBe("<p>Enter valid credentials</p> (reviewed)");
+    expect(modified.description.startsWith(testCase.data.steps[0].description)).toBe(true);
+    // expectedResult was echoed back completely unchanged.
+    expect(modified.expectedResult).toBe("<p>Login succeeds</p>");
+  });
+
+  test("the mock's __mock_insert_middle__ branch positions a new step via `order`, not just appended at the end (backlog item 9.43)", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId: product.data.id,
+      levelId: testLevel.id,
+      testType: "verification",
+      title: "TC",
+      steps: [
+        { description: "<p>Step one</p>", expectedResult: "<p>OK</p>" },
+        { description: "<p>Step two</p>", expectedResult: "<p>OK</p>" },
+        { description: "<p>Step three</p>", expectedResult: "<p>OK</p>" },
+      ],
+    });
+    const [step1, step2, step3] = testCase.data.steps.map((s: any) => s.id);
+
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      originalSteps: testCase.data.steps.map((s: any) => ({
+        key: s.id,
+        description: s.description,
+        expectedResult: s.expectedResult,
+      })),
+      history: [],
+      instruction: "__mock_insert_middle__ please add a step right after the first one",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeUndefined();
+    expect(result.data.upserts).toHaveLength(1);
+    expect(result.data.upserts[0].key).toBeNull();
+    // `order` places a null (the new step) right after step one, then the rest of the
+    // original steps in their original order - not the new step appended at the end.
+    expect(result.data.order).toEqual([step1, null, step2, step3]);
+  });
+
+  test("a hallucinated requirementId the mock returns never reaches the client - filtered server-side (backlog item 9.44)", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId: product.data.id,
+      levelId: testLevel.id,
+      testType: "verification",
+      title: "TC",
+      steps: [{ description: "<p>Step</p>", expectedResult: "<p>OK</p>" }],
+    });
+
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: product.data.id,
+      originalSteps: testCase.data.steps.map((s: any) => ({
+        key: s.id,
+        description: s.description,
+        expectedResult: s.expectedResult,
+      })),
+      history: [],
+      instruction: "__mock_hallucinate_requirement__ please add a step",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeUndefined();
+    expect(result.data.upserts).toHaveLength(1);
+    // The mock proposed a made-up requirementId that was never offered as context - the
+    // server must strip it, not pass it through, or the client's next request (which
+    // requires every requirementId to be a real uuid) would hard-fail.
+    expect(result.data.upserts[0].requirementIds).toEqual([]);
+  });
+
+  test("a step's already-linked, genuinely real requirementId is never treated as hallucinated", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const req = await createRequirement(tenant);
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId: req.productId,
+      levelId: testLevel.id,
+      testType: "verification",
+      title: "TC",
+      steps: [{ description: "<p>Step</p>", expectedResult: "<p>OK</p>", requirementIds: [req.requirementId] }],
+    });
+
+    // __mock_modify_step__'s upsert doesn't itself carry a requirementId, so this is
+    // really just confirming the request round-trips without error when a real,
+    // already-linked id is present in `originalSteps` - the filter's job is to strip
+    // ids that AREN'T real, not to be tripped up by ones that are.
+    //
+    // Honest gap: the filter treats "valid" as the union of the AI's (300-capped)
+    // context list and whatever ids were already in `originalSteps` (see
+    // testCases.suggestSteps's own comment) specifically so an already-linked
+    // requirement beyond that cap survives an edit - that exact beyond-the-cap scenario
+    // isn't exercised here, since creating 300+ requirements is too expensive for an
+    // e2e test to set up. This test only confirms the ordinary, well-within-the-cap case
+    // doesn't regress.
+    const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
+      productId: req.productId,
+      originalSteps: [{ key: "some-step-key", description: "<p>Step</p>", expectedResult: "<p>OK</p>", requirementIds: [req.requirementId] }],
+      history: [],
+      instruction: "__mock_modify_step__ please reword it",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data.error).toBeUndefined();
+  });
+
+  test("RLS: one tenant's saved AI connection is invisible to another tenant", async () => {
+    const tenantA = await registerTenant(`E2E Org A ${uniqueSuffix()}`);
+    const tenantB = await registerTenant(`E2E Org B ${uniqueSuffix()}`);
+    await saveMockConnection(tenantA);
+
+    const asB = await rpc(tenantB.cookie, "GET", "llm.getConnection");
+    expect(asB.data).toBeNull();
+  });
+});

@@ -65,6 +65,17 @@
  * that conflict entirely instead of fighting over the same properties in two places. */
 body {
   @apply antialiased;
+  /* Without this, a two-finger horizontal swipe/scroll anywhere on a page with no real
+   * horizontal content of its own still gets interpreted by the browser as "navigate
+   * back/forward in history" (Chrome's swipe-navigation gesture) - on some platforms
+   * this renders as the current page sliding to reveal the actual previous/next page in
+   * history underneath, which looks exactly like a real horizontal-scroll layout bug
+   * even though nothing on the page is actually wider than the viewport. Real, reported
+   * bug (backlog item 9.46) - confirmed via direct diagnosis that no element anywhere on
+   * the affected pages had any meaningful scrollable width of its own. Many sites set
+   * this defensively for exactly this reason; this app never had. `-x` only - vertical
+   * overscroll (pull-to-refresh-style bounce) is left alone, it's not what broke here. */
+  overscroll-behavior-x: none;
 }
 
 /* The read-only rich-text renderer (rich-text-view.tsx) - the editor itself (Tiptap, via

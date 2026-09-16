@@ -5,21 +5,26 @@ import {
   type CustomFieldValueInput,
   deleteTestCase,
   DomainError,
+  formatItemId,
   getEffectiveRequirementLinks,
   getExecutionWithSteps,
   getCustomFieldValues,
   getCustomFieldValuesForEntities,
+  getLlmConnection,
   getTestCaseWithSteps,
   getTestLevel,
   listEnvironments,
   listEvidenceForStepExecution,
+  listRequirementsForStepSuggestions,
   listTestLevels,
   recordStepResult,
+  sanitizeRichText,
   setCustomFieldValues,
   startExecution,
   updateTestCase,
 } from "@galm/core";
 import { schema, withTenant } from "@galm/db";
+import { proposedStepSchema, proposeStepChanges, resolveModel } from "@galm/integrations-llm";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -40,6 +45,17 @@ const testStepInputSchema = z.object({
   description: z.string().trim().min(1).max(20000),
   expectedResult: z.string().trim().min(1).max(20000),
   purpose: z.string().trim().max(20000).optional(),
+  requirementIds: z.array(z.string().uuid()).optional(),
+});
+
+/** Like testStepInputSchema above, but carries the editor's client-generated `key` too
+ * (for the AI assist's diffing - see step-diff.ts) and has no min-length requirement,
+ * since this is a snapshot of whatever's currently in the editor, not a save. */
+const stepForAssistSchema = z.object({
+  key: z.string(),
+  description: z.string(),
+  expectedResult: z.string(),
+  purpose: z.string().optional(),
   requirementIds: z.array(z.string().uuid()).optional(),
 });
 
@@ -335,5 +351,92 @@ export const testCasesRouter = router({
       const userId = userIdOf(ctx);
       await withTenant(db, tenantId, (tx) => deleteTestCase(tx, tenantId, input.id, userId)).catch(toBadRequest);
       return { ok: true };
+    }),
+
+  /** AI-assisted step drafting (chat: instruction -> proposal -> refine/accept). Never
+   * persists anything - the client stages the proposal and only the existing
+   * create/update mutations above ever write test_steps rows. Never throws a TRPCError
+   * for "no connection saved" or "the AI call failed" - both come back as `{ error }`,
+   * same pattern as documentTemplates.previewHtml, so a transient hiccup doesn't hard-
+   * fail the assist dialog. */
+  suggestSteps: protectedProcedure
+    .input(
+      z.object({
+        productId: z.string().uuid(),
+        testCaseTitle: z.string().optional(),
+        testType: z.enum(["verification", "validation"]).optional(),
+        originalSteps: z.array(stepForAssistSchema),
+        previousProposal: z.array(proposedStepSchema).optional(),
+        history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })).max(50),
+        instruction: z.string().trim().min(1).max(4000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, async (tx) => {
+        const connection = await getLlmConnection(tx, tenantId);
+        if (!connection) return { error: "no AI connection saved yet - set one up in Settings first" };
+        const { requirements, truncated } = await listRequirementsForStepSuggestions(tx, tenantId, input.productId);
+        try {
+          const model = await resolveModel(connection);
+          const result = await proposeStepChanges(model, {
+            testCaseTitle: input.testCaseTitle,
+            testType: input.testType,
+            requirements: requirements.map((r) => ({
+              id: r.id,
+              itemId: formatItemId(r.levelCode, r.sequenceNumber),
+              title: r.title,
+              description: r.description,
+              background: r.background,
+              safetyClassification: r.safetyClassification,
+            })),
+            requirementsTruncated: truncated,
+            originalSteps: input.originalSteps.map((s) => ({
+              key: s.key,
+              description: s.description,
+              expectedResult: s.expectedResult,
+              purpose: s.purpose ?? null,
+              requirementIds: s.requirementIds ?? [],
+            })),
+            previousProposal: input.previousProposal,
+            history: input.history,
+            instruction: input.instruction,
+          });
+          // The model's HTML hasn't passed through the app's usual sanitize-on-write path
+          // (that only happens inside createTestCase/updateTestCase, once accepted and
+          // saved) - but the client renders this preview directly via RichTextView,
+          // which assumes its input is already safe. Sanitize here too so an unaccepted
+          // proposal can't carry a script tag or event handler into the browser,
+          // regardless of what the model (or a malicious 'openai_compatible' endpoint)
+          // returns; saving still re-sanitizes on accept, idempotently.
+          //
+          // Also drop any requirementId the model returned that wasn't actually offered
+          // as context - the system prompt says to only reference ids from the list, but
+          // nothing stops a model from hallucinating one, and an unfiltered bad id would
+          // later hard-fail Save or the next AI request's own uuid validation. "Valid"
+          // includes ids already linked on the input steps (not just the context list,
+          // which is capped at 300 - see listRequirementsForStepSuggestions) so an edit
+          // to a step already linked to a requirement outside that cap doesn't strip it.
+          const validRequirementIds = new Set([
+            ...requirements.map((r) => r.id),
+            ...input.originalSteps.flatMap((s) => s.requirementIds ?? []),
+          ]);
+          const sanitizedUpserts = result.upserts.map((s) => ({
+            ...s,
+            description: sanitizeRichText(s.description),
+            expectedResult: sanitizeRichText(s.expectedResult),
+            requirementIds: s.requirementIds.filter((id) => validRequirementIds.has(id)),
+          }));
+          return {
+            summary: result.summary,
+            upserts: sanitizedUpserts,
+            removedKeys: result.removedKeys,
+            order: result.order,
+            truncatedRequirements: truncated,
+          };
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : "the AI request failed" };
+        }
+      });
     }),
 });

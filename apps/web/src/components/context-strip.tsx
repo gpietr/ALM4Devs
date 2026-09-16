@@ -32,8 +32,14 @@ import { SignOutButton } from "./sign-out-button";
 export function TopBar({ left }: { left?: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 border-b bg-background px-4 py-2 text-sm">
-      {left}
-      <div className="ml-auto flex items-center gap-2">
+      {/* `min-w-0` is load-bearing - a flex item won't shrink below its content's
+          natural width by default, so without it this row's several items push the
+          whole page wider than the viewport on narrow screens. `overflow-x-auto` lets
+          this row scroll internally instead, if it still doesn't fit. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">{left}</div>
+      {/* `shrink-0` so the avatar/settings icons stay reachable, never squeezed by the
+          now-scrollable content beside them. */}
+      <div className="flex shrink-0 items-center gap-2">
         <UserCorner />
       </div>
     </div>

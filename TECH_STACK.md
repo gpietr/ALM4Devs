@@ -1666,6 +1666,203 @@ stack:
 tests still pass (no server-side behavior changed, so no regression expected there, but
 re-run anyway rather than assumed).
 
+## AI-assisted test step drafting (backlog item 9.37)
+
+A chat-style "Draft with AI" button on a test case's Steps section: tell it what to do
+(free text, can reference requirements including ones just added to the product), it
+proposes a full replacement step list shown as a diff, and you refine (another
+instruction) or accept (replaces the editor's real step list - the page's own,
+pre-existing Save button is still what persists anything).
+
+**Provider abstraction, and why the Vercel AI SDK specifically**: the user's own words
+when scoping this were "I don't want to commit to Claude code, I want it to be more
+generic" and "would I need a Vercel account?" - both real constraints. Landed on the
+Vercel AI SDK (`ai` + `@ai-sdk/anthropic`/`openai`/`openai-compatible`) partly because a
+second, not-yet-built feature this was scoped alongside ("generate a template from an
+uploaded PDF") wants multimodal input, which a hand-rolled OpenAI-wire-shape client
+(this codebase's usual plain-`fetch` style, e.g. `packages/integrations/spira`) doesn't
+solve for free across vendors. Confirmed with the user that this needs **no Vercel
+account or hosted gateway** - each `@ai-sdk/*` package calls that provider's own API
+directly with a key the tenant supplies. `resolveModel` always constructs an explicit
+provider instance (`createAnthropic(...)(modelId)`, etc.) and hands that object to
+`generateObject`, never a bare model-id string - a bare string is what routes through
+`ai@7`'s own built-in `@ai-sdk/gateway` provider, deliberately never reachable here.
+
+**"OpenAI-compatible" as the generality escape hatch**: rather than an `@ai-sdk/*`
+package per vendor, a single `openai_compatible` provider option takes a custom
+`baseURL` and covers self-hosted endpoints (Ollama, vLLM) and third-party
+OpenAI-shaped APIs (Groq, Together, DeepSeek) with one code path.
+
+**Credentials**: new `llm_connections` table, one row per tenant, a close mirror of
+`spira_connections` and its CRUD conventions - key never echoed back, empty key on
+re-save keeps the existing one, same documented plaintext-storage trust boundary as
+every other credential here (no KMS layer exists yet). `provider` is DB-CHECK-
+constrained; `model` is free text, not an enum - providers rename/add models faster than
+this app could track.
+
+**The diffing contract - real content comparison, never trusted from the model's own
+claims**: the system prompt has the model return the *complete* resulting list every
+turn (never a delta at this point), copying a step's client-generated `key` verbatim
+when unchanged, keeping it when modifying, using `key: null` only for a genuinely new
+step - so "a step the model didn't mention" is never an ambiguous state. The actual diff
+(`step-diff.ts`'s `diffProposedSteps`) is computed client-side by that same key -
+by-key matching, then normalized-HTML comparison to tell "modified" from "unchanged" -
+never by trusting what the model claims about its own edit. An unmatched key is
+defensively treated as `added`, never crashes. The baseline is fixed for the whole
+dialog session, so every refinement's badges answer "what would change relative to
+what's really in the editor now," not "since the last message."
+
+**A real security gap, found and fixed during implementation**: the diff preview
+renders proposed HTML via `RichTextView`, which assumes its input already passed
+`sanitizeRichText` - true for every other caller, but this feature's HTML comes
+straight from the model and had never been through that sanitizer before an *unaccepted*
+proposal renders. A malicious or compromised endpoint (realistically: a self-hosted
+`openai_compatible` connection) could return a script tag or `onerror` attribute that
+executes before Accept is ever clicked. Fixed by sanitizing every proposed step
+server-side, inside `suggestSteps`, before the response reaches the browser - saving
+still re-sanitizes on accept regardless, so the one-sanitize-choke-point invariant holds
+everywhere.
+
+**Testing an external paid API without ever calling it**: `resolveModel` has one
+doubly-gated escape hatch - a connection whose `baseUrl` is the sentinel
+`mock://step-suggestions` *and* `ALLOW_MOCK_LLM_PROVIDER=1` together select `ai/test`'s
+`MockLanguageModelV4`, imported lazily so a real request path never loads it. No
+`"mock"` value exists in the DB CHECK or settings UI. The mock sniffs the prompt for
+sentinel substrings to drive specific branches, and for the default case **parses the
+real baseline step's key back out of the prompt** rather than using a hardcoded fake
+one - the first attempt used a fake key, and a real-browser smoke test immediately
+caught the consequence: since a real key is a UUID, the fake one never matched, the
+diff correctly classified the row as `added` rather than `unchanged` (correct diff
+behavior - a flaw in the mock, not the product), and accepting it silently dropped the
+original step's content. Fixed by having the mock echo the real key back, which is what
+a real, well-behaved model would do anyway.
+
+**Verified for real, in multiple layers**: `bun run typecheck` clean across all
+packages including the new `packages/integrations/llm`; a Docker rebuild that genuinely
+failed on the first attempt (the Dockerfile only `COPY`'d the existing integration
+package's `package.json`, not the new one - a real caught bug, not hypothetical); the
+migration applied and confirmed via `\d llm_connections` against the live container;
+the e2e suite (6 new tests) passing alongside the pre-existing 75. Because this is
+fundamentally an interactive chat-dialog feature the HTTP-only e2e suite can't exercise,
+a real headless-browser smoke test (Playwright, one-off) drove the actual dialog end to
+end - and is what caught the mock-key bug above before it shipped. Whether a *real*
+provider's suggestions are good is not something automation can assert.
+
+## AI step drafting: delta output instead of the full list every turn (backlog item 9.42)
+
+The original design (9.37) had the model return the *complete* resulting step list on
+every turn, including every unchanged step, so "a step not mentioned" would never be an
+ambiguous state for the diff to interpret. Sound reasoning, but it meant regenerating
+every untouched step's full HTML verbatim just to say "this one's the same" - a
+one-step edit on a case with many steps paid full output-token cost every turn. The
+user noticed directly ("it uses a lot of tokens") and asked whether outputting only
+added/modified steps would help.
+
+**The redesign**: the response became a delta - `{ summary, upserts: ProposedStep[],
+removedKeys: string[] }` - instead of a full list. `upserts` holds only new or actually-
+changing steps; `removedKeys` holds keys to delete; anything unmentioned automatically
+stays as it is. The old ambiguity doesn't return: an unmentioned step now has one
+unambiguous meaning (unchanged) by construction, just not spelled out explicitly.
+
+Reconstructing the full list for the diff/accept UI (`diffProposedSteps`/
+`acceptProposal`, unchanged by this) is now a small, free, client-side merge -
+`applyStepDelta(current, delta)` - not something the LLM has to do. `current` is the
+resulting list from just before this turn: the editor's own steps for a conversation's
+first message, or the previous turn's merge result for a refinement.
+
+**A structural side benefit, not just a cost one**: 9.41's false-positive "modified" bug
+existed because the model, asked to reproduce an unchanged step "verbatim," would
+introduce incidental reformatting that a byte-level comparison had to be taught to see
+through. Under the delta contract, an untouched step is never regenerated at all - that
+failure mode becomes structurally impossible for any step the response doesn't mention,
+not just harder to hit. 9.41's normalization stays as real defense-in-depth for steps
+the model *does* touch.
+
+**New steps need a real key the moment they're proposed, not just once accepted.** In
+the old design this didn't matter - an unaccepted new step was fully regenerated every
+turn regardless. Under the delta contract, a refinement like "reword the step you just
+added" needs a real, stable key to reference before anything's accepted.
+`applyStepDelta` now assigns one (`crypto.randomUUID()`, same mechanism `acceptProposal`
+already used at final accept) the instant a new step is merged in, echoed back as part
+of `previousProposal` on the next request.
+
+**The honest trade-off**: the old design let the model freely reorder the whole list
+(e.g. "swap steps 2 and 3"). The delta contract carries no ordering signal - a modified
+step stays put, a new one appends at the end. Free-form AI-driven reordering is lost;
+manual reordering (the step editor's own up/down buttons) still works. Reordering
+wasn't already a first-class diff feature (no "moved" badge - see 9.39), so this was
+judged an acceptable trade for the token savings.
+
+**Deferred, recorded so it isn't re-litigated later**: prompt caching (real *input*-
+token savings on refinement turns, since the requirement list and instructions repeat
+verbatim, but provider-specific complexity); capping resent history to the last few
+turns instead of the whole chat; on-demand/tool-call-style requirement fetching instead
+of sending up to 300 requirements' full text every turn (the biggest remaining
+input-token win for large products, but a genuine multi-round architecture change).
+
+**Verified for real, and the first real-browser run caught an actual bug before it
+shipped.** The mock's branches had carried over the old design's habit of every
+response also adding an unrelated step - under the new contract, a two-turn Playwright
+script ("add a step" on a 3-step case, then a refinement) came back with 5 diff rows on
+turn 2 where only 4 were expected. Not an app bug - a stale assumption in the mock -
+fixed by making each branch perform exactly one delta operation. After the fix: turn 1
+rendered exactly 1 added + 3 unchanged; turn 2 rendered 1 added (still present, not
+duplicated) + 2 unchanged + 1 modified with a genuine Before/After - proving the
+multi-turn flow, including the new-step-gets-a-key mechanism, holds end to end.
+`step-diff.test.ts` gained 6 new unit tests (including the exact "add then refine that
+same new step" scenario); the e2e suite gained a remove-branch test and tightened
+modify-branch assertions. `bun run typecheck` clean, full Docker rebuild, all 83 e2e
+tests pass (82 prior + 1 new), all 22 unit tests pass (16 prior + 6 new).
+
+## AI step drafting: real positioning, and step numbers in the diff (backlog item 9.43)
+
+9.42's delta redesign explicitly flagged, as an accepted trade-off, that a new step
+would only ever append at the end. Real usage disagreed: "it added 2 steps in the
+middle, but they ended up at the end." A trade-off that looks reasonable on paper can
+still turn out wrong in practice - the fix here is that correction, not a reversal of
+the delta design itself (upserts/removedKeys still carry no position information; a new,
+optional field handles position specifically).
+
+**The `order` field**: `stepSuggestionResultSchema` gained `order: z.array(z.string()
+.nullable()).optional()` - the complete final sequence of step keys, real keys for
+existing steps, `null` as a placeholder for each new step from `upserts` (matched
+positionally). Optional and omitted for the common case - a pure content edit pays
+nothing extra; a new step still defaults to the end, unchanged from 9.42. The system
+prompt is explicit that `upserts`/`removedKeys` alone never change order, and that
+`order` is required whenever a new step belongs somewhere other than the end or
+existing steps need reordering.
+
+**`applyStepDelta` resolving `order`**: content updates happen first, unchanged; `order`,
+when present, then decides final position by walking its entries, resolving each real
+key against the content-updated list and each `null` against the next new step in
+sequence. Two defensive fallbacks, matching this feature's "never trust the model,
+never crash, never silently lose data" posture: an unknown/hallucinated key in `order`
+is simply skipped; any step still present that `order` didn't mention is appended at the
+end rather than dropped - the same pre-9.43 fallback, so a partially-wrong `order`
+degrades toward "looks like 9.42" rather than data loss.
+
+**Step numbers in the diff - a feature that fell out of doing this properly, not a
+separately-designed one**: `diffProposedSteps` now computes `position` (where a step
+ends up in the resulting list) and `originalPosition` (where it was in the baseline) on
+every row. The panel renders "Step N", "Was step N" for a removed row, and - once both
+are tracked for real - "Step N (was M)" whenever a *kept* step's position shifted,
+making a reposition visible even for a step whose content never changed. Requesting
+step numbers and fixing insertion position turned out to be the same underlying gap
+(real position tracking, missing before this), not two unrelated asks.
+
+**Verified for real, at every layer the fix touches.** Unit tests cover `applyStepDelta`'s
+`order` handling (placement via a null placeholder, reordering alone, an unknown key
+skipped, a step `order` omitted still surviving, interaction with `removedKeys`) and
+`diffProposedSteps`'s new position fields. A new e2e test drives the mock's
+`__mock_insert_middle__` branch. Then, because this was specifically reported as
+visible end-to-end UI behavior, a real-browser script reran the actual scenario against
+a genuine 3-step case: the diff's own labels placed the new step at "Step 2" (not 4)
+with "Step 3 (was 2)"/"Step 4 (was 3)" for the displaced steps; Accept showed the real
+editor table with the new step genuinely in place; Save and a re-fetch confirmed the
+database persisted that exact order - checked at the diff preview, the live editor, and
+the persisted database independently. `bun run typecheck` clean, full Docker rebuild,
+all 84 e2e tests pass (83 prior + 1 new), all 31 unit tests pass (22 prior + 9 new).
+
 ## Spira import: reusing a legacy id as this system's own id (backlog item 9.16)
 
 A team migrating from Spira often already has a custom field holding a pre-migration id
