@@ -25,11 +25,10 @@ interface Mapping {
   title: string;
   description: string;
   background: string;
-  safetyClassification: string;
   legacyId: string;
 }
 
-const EMPTY_MAPPING: Mapping = { title: "", description: "", background: "", safetyClassification: "", legacyId: "" };
+const EMPTY_MAPPING: Mapping = { title: "", description: "", background: "", legacyId: "" };
 
 export default function SpiraImportRequirementsPage() {
   const connection = trpc.spiraImport.getConnection.useQuery();
@@ -145,13 +144,6 @@ export default function SpiraImportRequirementsPage() {
               allowNone
             />
             <MappingSelect
-              label="Safety classification (A/B/C)"
-              value={mapping.safetyClassification}
-              onChange={(v) => setMapping((m) => ({ ...m, safetyClassification: v }))}
-              fields={fields.data.fields}
-              allowNone
-            />
-            <MappingSelect
               label="Legacy ID (reuse as this system's id)"
               value={mapping.legacyId}
               onChange={(v) => setMapping((m) => ({ ...m, legacyId: v }))}
@@ -219,7 +211,6 @@ export default function SpiraImportRequirementsPage() {
                   title: mapping.title,
                   description: mapping.description,
                   background: mapping.background || undefined,
-                  safetyClassification: mapping.safetyClassification || undefined,
                   legacyId: mapping.legacyId || undefined,
                   customFields: Object.keys(customFieldMapping).length ? customFieldMapping : undefined,
                 },
@@ -241,7 +232,6 @@ export default function SpiraImportRequirementsPage() {
                   <p className="font-medium">{row.title}</p>
                   <p className="text-muted-foreground">{row.description}</p>
                   {row.background && <RichTextView html={row.background} />}
-                  {row.safetyClassification && <p className="text-xs text-muted-foreground">Class {row.safetyClassification}</p>}
                   {row.requestedSequenceNumber != null && (
                     <p className="text-xs text-muted-foreground">
                       Would try to claim local id #{row.requestedSequenceNumber}
@@ -288,7 +278,6 @@ export default function SpiraImportRequirementsPage() {
                         title: mapping.title,
                         description: mapping.description,
                         background: mapping.background || undefined,
-                        safetyClassification: mapping.safetyClassification || undefined,
                         legacyId: mapping.legacyId || undefined,
                         customFields: Object.keys(customFieldMapping).length ? customFieldMapping : undefined,
                       },

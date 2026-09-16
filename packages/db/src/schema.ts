@@ -101,9 +101,11 @@ export const items = pgTable("items", {
 // know the behavior of - e.g. only entering the "approved" or "baselined" category
 // requires an e-signature. A custom status always maps to exactly one category; the
 // category is what the workflow engine reasons about, the status row is what the user
-// sees and can rename. Type and safety classification stay fixed CHECK-constrained
-// values, deliberately NOT customizable the way status is - those are IEC 62304/regulatory
-// concepts, not team preference.
+// sees and can rename. Safety classification (requirements) and test type (test cases)
+// used to be a second fixed-enum concept alongside status, on the same "regulatory
+// concept, not team preference" reasoning - reversed later (see custom-fields.ts's
+// seedDefaultCustomFields): they're ordinary tenant-defined custom fields now, just
+// pre-seeded so every tenant still gets them without configuring anything.
 
 export const products = pgTable("products", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -240,9 +242,6 @@ export const requirements = pgTable("requirements", {
   // display position. The table-level unique constraint below is the actual guarantee;
   // the counter is just what makes duplicates unlikely in the first place.
   sequenceNumber: integer("sequence_number").notNull(),
-  // CHECK-constrained: 'A' | 'B' | 'C', nullable (not every requirement needs one, e.g.
-  // a User Need before it's been classified).
-  safetyClassification: text("safety_classification"),
   // Upward trace: optional, user-chosen from a dropdown of same-product requirements at a
   // higher level (lower sortOrder) - see packages/core's createRequirement for the actual
   // hierarchy rule. ON DELETE SET NULL: removing a parent un-parents its children rather
@@ -361,10 +360,6 @@ export const testCases = pgTable("test_cases", {
   // The number half of this test case's human-readable id - see requirements.sequenceNumber
   // for the identical mechanism (levels.code + sequenceNumber, joined at read time).
   sequenceNumber: integer("sequence_number").notNull(),
-  // CHECK-constrained: 'verification' | 'validation' - PRODUCT.md's fixed distinction
-  // (Verification traces to a Software Item Spec, Validation to a Requirement/User Need),
-  // deliberately NOT user-customizable the way levels are.
-  testType: text("test_type").notNull(),
   title: text("title").notNull(),
   createdBy: text("created_by")
     .notNull()
@@ -590,14 +585,15 @@ export const externalLinks = pgTable(
 //
 // Deliberately NOT versioned, and not part of `requirement_versions`: unlike title/
 // description/background (which get a new version, a status, and can require e-signature
-// on every meaningful change), a custom field is closer in spirit to
-// `requirements.safetyClassification` - real content, but metadata a team corrects
-// directly rather than content an approval workflow needs to track changes to. Applying
-// the same non-versioned treatment to both requirements and test cases keeps the feature
-// symmetric between them (test cases have no versioning concept at all to hang it on
-// anyway). If a specific field later turns out to need approval-gated change tracking,
+// on every meaningful change), a custom field is real content, but metadata a team
+// corrects directly rather than content an approval workflow needs to track changes to.
+// Applying the same non-versioned treatment to both requirements and test cases keeps the
+// feature symmetric between them (test cases have no versioning concept at all to hang it
+// on anyway). If a specific field later turns out to need approval-gated change tracking,
 // that's a real, separate decision to make for that field - not assumed here for all of
-// them.
+// them. Safety Classification (requirements) and Test Type (test cases) are themselves
+// just rows in these three tables now, pre-seeded per tenant (see
+// packages/core/src/custom-fields.ts's seedDefaultCustomFields) - not a separate concept.
 export const customFieldDefinitions = pgTable(
   "custom_field_definitions",
   {

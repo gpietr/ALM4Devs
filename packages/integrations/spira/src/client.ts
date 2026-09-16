@@ -150,14 +150,15 @@ const STANDARD_REQUIREMENT_FIELDS: SpiraFieldDefinition[] = [
  * TestCaseFieldMapping's docstring). TestCaseTypeName and TestCaseStatusName are Spira
  * *standard* fields, not custom ones, but are included here anyway for the same reason
  * Requirement's RequirementTypeName/ImportanceName/StatusName are in
- * STANDARD_REQUIREMENT_FIELDS above: our fixed verification/validation `testType` split
- * doesn't line up with Spira's own test case type taxonomy (see MappedTestCase's
- * `spiraTestCaseType`, which is shown in the preview but never written for exactly that
- * reason), so Spira's Type/Status aren't written automatically - but a team can still map
- * either one onto a custom field of their own (e.g. a "list" field mirroring Spira's
- * values) via the generic custom-field mapping, the same way requirement type/importance/
- * status can be. Originally missing here - a real gap a user found after already relying
- * on the equivalent requirement-level mapping. */
+ * STANDARD_REQUIREMENT_FIELDS above: our own "Test Type" (a seeded custom field - see
+ * packages/core/src/custom-fields.ts - with just Verification/Validation as its default
+ * options) doesn't line up 1:1 with Spira's own test case type taxonomy (see
+ * MappedTestCase's `spiraTestCaseType`, shown in the preview but never written
+ * automatically for exactly that reason), so a team maps whichever of Spira's Type/Status
+ * they actually want onto a custom field of their own - "Test Type" included - via the
+ * generic custom-field mapping, same as requirement type/importance/status. Originally
+ * missing here - a real gap a user found after already relying on the equivalent
+ * requirement-level mapping. */
 const STANDARD_TEST_CASE_FIELDS: SpiraFieldDefinition[] = [
   { key: "Name", label: "Name", isCustom: false },
   { key: "TestCaseTypeName", label: "Test Case Type", isCustom: false },

@@ -233,6 +233,21 @@ async function createRequirement(
   };
 }
 
+/** Test Type is a seeded custom field now (see packages/core/src/custom-fields.ts's
+ * seedDefaultCustomFields), not a dedicated column - and it's required, so every test
+ * that creates a test case needs to supply it explicitly via customFieldValues, same as
+ * any other required custom field. Looked up by name/option label rather than a
+ * hardcoded id, since seeding assigns a fresh uuid per tenant. */
+async function testTypeCustomFieldValue(
+  cookie: string,
+  label: "Verification" | "Validation",
+): Promise<{ fieldId: string; value: string }> {
+  const fields = await rpc(cookie, "GET", "settings.listCustomFields", { entityType: "test_case" });
+  const field = fields.data.find((f: any) => f.name === "Test Type");
+  const option = field.options.find((o: any) => o.value === label);
+  return { fieldId: field.id, value: option.id };
+}
+
 async function moveToInReview(tenant: TestTenant, requirementId: string) {
   const res = await rpc(tenant.cookie, "POST", "requirements.transition", { requirementId, toCategory: "in_review" });
   expect(res.ok).toBe(true);
@@ -724,7 +739,7 @@ describe("e2e: test cases", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [
         {
@@ -751,7 +766,7 @@ describe("e2e: test cases", () => {
     const res = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [],
     });
@@ -767,7 +782,7 @@ describe("e2e: test cases", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "validation",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Validation")],
       title: "TC",
       steps: [
         { description: "<p>Step 1</p>", expectedResult: "<p>Expected 1</p>" },
@@ -828,7 +843,7 @@ describe("e2e: test cases", () => {
     const testCase = await rpc(tenantA.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenantA.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -895,7 +910,7 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       requirementIds: [requirementId],
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
@@ -956,7 +971,7 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -977,7 +992,7 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1002,7 +1017,7 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     const testCaseB = await rpc(tenantB.cookie, "POST", "testCases.create", {
       productId,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenantB.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1077,14 +1092,14 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     const tc1 = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC1",
       steps: [step],
     });
     const tc2 = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC2",
       steps: [step],
     });
@@ -1096,7 +1111,7 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     const tc3 = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC3",
       steps: [step],
     });
@@ -1126,7 +1141,7 @@ describe("e2e: settings - managing test levels and environments", () => {
     await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: created.data.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1178,14 +1193,14 @@ describe("e2e: sequential per-level human-readable ids", () => {
     const tc1 = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC1",
       steps: [step],
     });
     const tc2 = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC2",
       steps: [step],
     });
@@ -1233,7 +1248,7 @@ describe("e2e: sequential per-level human-readable ids", () => {
     await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1319,15 +1334,18 @@ describe("e2e: custom fields (backlog item 9.19)", () => {
     expect(dupe.ok).toBe(false);
     expect(dupe.error?.message).toMatch(/already exists/);
 
+    // "Safety Classification" leads every list here - it's pre-seeded for every tenant
+    // (see packages/core/src/custom-fields.ts's seedDefaultCustomFields), sortOrder 0,
+    // ahead of anything created in this test.
     let list = await rpc(tenant.cookie, "GET", "settings.listCustomFields", { entityType: "requirement" });
-    expect(list.data.map((f: any) => f.name)).toEqual(["Risk Level", "Owner"]);
+    expect(list.data.map((f: any) => f.name)).toEqual(["Safety Classification", "Risk Level", "Owner"]);
 
     const reordered = await rpc(tenant.cookie, "POST", "settings.reorderCustomField", {
       fieldId: a.data.id,
       direction: "down",
     });
     expect(reordered.ok).toBe(true);
-    expect(reordered.data.map((f: any) => f.name)).toEqual(["Owner", "Risk Level"]);
+    expect(reordered.data.map((f: any) => f.name)).toEqual(["Safety Classification", "Owner", "Risk Level"]);
 
     const renamed = await rpc(tenant.cookie, "POST", "settings.renameCustomField", {
       fieldId: a.data.id,
@@ -1346,7 +1364,7 @@ describe("e2e: custom fields (backlog item 9.19)", () => {
     const deleted = await rpc(tenant.cookie, "POST", "settings.deleteCustomField", { fieldId: b.data.id });
     expect(deleted.ok).toBe(true);
     list = await rpc(tenant.cookie, "GET", "settings.listCustomFields", { entityType: "requirement" });
-    expect(list.data.map((f: any) => f.name)).toEqual(["Risk Rating"]);
+    expect(list.data.map((f: any) => f.name)).toEqual(["Safety Classification", "Risk Rating"]);
   });
 
   test("list-type field: options can be added, renamed freely, and reordered, but not deleted while in use", async () => {
@@ -1506,16 +1524,16 @@ describe("e2e: custom fields (backlog item 9.19)", () => {
       name: "Automated",
       fieldType: "boolean",
     });
+    const testType = await testTypeCustomFieldValue(tenant.cookie, "Verification");
 
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const level = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
     const created = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: level.id,
-      testType: "verification",
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
-      customFieldValues: [{ fieldId: field.data.id, value: true }],
+      customFieldValues: [testType, { fieldId: field.data.id, value: true }],
     });
     expect(created.ok).toBe(true);
     const testCaseId = created.data.testCase.id;
@@ -1530,9 +1548,15 @@ describe("e2e: custom fields (backlog item 9.19)", () => {
     const listedRow = list.data.find((r: any) => r.id === testCaseId);
     expect(listedRow.customFieldValues.find((v: any) => v.name === "Automated").value).toBe("true");
 
-    const updated = await rpc(tenant.cookie, "POST", "testCases.updateCustomFieldValues", {
+    // Custom field values are folded into the same update mutation as everything else
+    // now (see packages/core/src/test-cases.ts's updateTestCase docstring) - every
+    // defined field is reconciled on every call, so Test Type has to be resent here too,
+    // not just the field actually changing.
+    const updated = await rpc(tenant.cookie, "POST", "testCases.update", {
       testCaseId,
-      values: [{ fieldId: field.data.id, value: false }],
+      title: "TC",
+      steps: [{ id: created.data.steps[0].id, description: "<p>S</p>", expectedResult: "<p>E</p>" }],
+      customFieldValues: [testType, { fieldId: field.data.id, value: false }],
     });
     expect(updated.ok).toBe(true);
     const afterUpdate = await rpc(tenant.cookie, "GET", "testCases.get", { id: testCaseId });
@@ -1561,10 +1585,13 @@ describe("e2e: custom fields (backlog item 9.19)", () => {
     expect(deleted.ok).toBe(true);
 
     // The requirement itself is untouched - only the now-nonexistent field's value is
-    // gone (there's nothing left to even ask for).
+    // gone (there's nothing left to even ask for). "Safety Classification" is still a
+    // defined field for this tenant (pre-seeded - see seedDefaultCustomFields), so it's
+    // still one entry here, just unset - "Temp Field" is what's actually gone.
     const detail = await rpc(tenant.cookie, "GET", "requirements.get", { id: req.data.requirement.id });
     expect(detail.ok).toBe(true);
-    expect(detail.data.customFieldValues).toEqual([]);
+    expect(detail.data.customFieldValues.map((v: any) => v.name)).toEqual(["Safety Classification"]);
+    expect(detail.data.customFieldValues[0].value).toBeNull();
   });
 });
 
@@ -1595,7 +1622,7 @@ describe("e2e: document generation (backlog item 9.29)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC For PDF",
       steps: [{ description: "<p>Do the thing</p>", expectedResult: "<p>It works</p>" }],
     });
@@ -1635,7 +1662,7 @@ describe("e2e: document generation (backlog item 9.29)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1754,7 +1781,7 @@ describe("e2e: document generation (backlog item 9.29)", () => {
     const testCase = await rpc(tenantA.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenantA.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1806,7 +1833,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "Preview Me",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1843,7 +1870,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1876,7 +1903,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1921,7 +1948,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "Example TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1947,7 +1974,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     const testCase = await rpc(tenantB.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenantB.cookie, "Verification")],
       title: "B's TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1971,7 +1998,7 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "Login / Logout",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -1994,7 +2021,7 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -2038,14 +2065,14 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     const tc1 = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "First",
       steps: [step],
     });
     const tc2 = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "Second",
       steps: [step],
     });
@@ -2079,7 +2106,7 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -2117,7 +2144,7 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "Real One",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -2203,7 +2230,7 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     const testCaseB = await rpc(tenantB.cookie, "POST", "testCases.create", {
       productId: productB.data.id,
       levelId: testLevelB.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenantB.cookie, "Verification")],
       title: "B's TC",
       steps: [{ description: "<p>S</p>", expectedResult: "<p>E</p>" }],
     });
@@ -2298,7 +2325,7 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>Existing step</p>", expectedResult: "<p>OK</p>" }],
     });
@@ -2310,7 +2337,6 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     const result = await rpc(tenant.cookie, "POST", "testCases.suggestSteps", {
       productId: product.data.id,
       testCaseTitle: "TC",
-      testType: "verification",
       originalSteps: testCase.data.steps.map((s: any) => ({
         key: s.id,
         description: s.description,
@@ -2367,7 +2393,7 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>Original step</p>", expectedResult: "<p>Original result</p>" }],
     });
@@ -2405,7 +2431,7 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>Step to remove</p>", expectedResult: "<p>OK</p>" }],
     });
@@ -2439,7 +2465,7 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>Enter valid credentials</p>", expectedResult: "<p>Login succeeds</p>" }],
     });
@@ -2477,7 +2503,7 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [
         { description: "<p>Step one</p>", expectedResult: "<p>OK</p>" },
@@ -2514,7 +2540,7 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>Step</p>", expectedResult: "<p>OK</p>" }],
     });
@@ -2546,7 +2572,7 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: req.productId,
       levelId: testLevel.id,
-      testType: "verification",
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
       title: "TC",
       steps: [{ description: "<p>Step</p>", expectedResult: "<p>OK</p>", requirementIds: [req.requirementId] }],
     });

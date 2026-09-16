@@ -25,6 +25,48 @@ function noun(entityType: CustomFieldEntityType): string {
   return entityType === "requirement" ? "requirement" : "test case";
 }
 
+// --- Default fields, seeded per tenant --------------------------------------------
+
+/** Safety Classification (requirements) and Test Type (test cases) used to be dedicated,
+ * hardcoded columns - they're ordinary custom fields now, seeded here so every tenant
+ * still gets them without configuring anything, but with zero special treatment beyond
+ * that: a tenant can rename, reorder, add options to, or delete them exactly like any
+ * other custom field. Seeded once for a brand-new tenant (see seedDefaultCustomFields,
+ * called from /api/register) and once, historically, for every pre-existing tenant (see
+ * packages/db/migrations-manual/013) - deliberately NOT part of
+ * scripts/backfill-tenant-defaults.ts's ongoing "missing a default row" reconciliation,
+ * since unlike a level or status, a custom field can be deleted down to zero, and that
+ * script has no way to tell "never seeded" apart from "tenant deleted it on purpose". */
+const DEFAULT_REQUIREMENT_CUSTOM_FIELDS: ReadonlyArray<{
+  name: string;
+  fieldType: CustomFieldType;
+  isRequired: boolean;
+  options: readonly string[];
+}> = [{ name: "Safety Classification", fieldType: "list", isRequired: false, options: ["A", "B", "C"] }];
+
+const DEFAULT_TEST_CASE_CUSTOM_FIELDS: ReadonlyArray<{
+  name: string;
+  fieldType: CustomFieldType;
+  isRequired: boolean;
+  options: readonly string[];
+}> = [{ name: "Test Type", fieldType: "list", isRequired: true, options: ["Verification", "Validation"] }];
+
+/** Called once, right after a tenant is created (see apps/web/src/app/api/register) -
+ * same convention as seedDefaultStatuses/seedDefaultLevels. */
+export async function seedDefaultCustomFields(db: TenantTx, tenantId: string): Promise<void> {
+  for (const spec of [...DEFAULT_REQUIREMENT_CUSTOM_FIELDS.map((f) => ({ ...f, entityType: "requirement" as const })), ...DEFAULT_TEST_CASE_CUSTOM_FIELDS.map((f) => ({ ...f, entityType: "test_case" as const }))]) {
+    const field = await createCustomFieldDefinition(db, tenantId, {
+      entityType: spec.entityType,
+      name: spec.name,
+      fieldType: spec.fieldType,
+      isRequired: spec.isRequired,
+    });
+    for (const option of spec.options) {
+      await createCustomFieldListOption(db, tenantId, field.id, option);
+    }
+  }
+}
+
 // --- Field definitions -------------------------------------------------------------
 
 export async function listCustomFieldDefinitions(db: TenantTx, tenantId: string, entityType: CustomFieldEntityType) {

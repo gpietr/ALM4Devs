@@ -8,12 +8,10 @@ export interface TraceabilityRow {
   requirementSequenceNumber: number;
   levelName: string;
   levelCode: string;
-  safetyClassification: string | null;
   testCaseId: string | null;
   testCaseTitle: string | null;
   testCaseSequenceNumber: number | null;
   testCaseLevelCode: string | null;
-  testType: string | null;
   lastExecutionStatus: string | null;
   lastExecutionStartedAt: Date | null;
   lastExecutionEnvironmentName: string | null;
@@ -50,7 +48,6 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
       levelName: schema.levels.name,
       levelCode: schema.levels.code,
       levelSortOrder: schema.levels.sortOrder,
-      safetyClassification: schema.requirements.safetyClassification,
     })
     .from(schema.requirements)
     .innerJoin(schema.requirementVersions, eq(schema.requirements.currentVersionId, schema.requirementVersions.id))
@@ -91,7 +88,6 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
             id: schema.testCases.id,
             title: schema.testCases.title,
             sequenceNumber: schema.testCases.sequenceNumber,
-            testType: schema.testCases.testType,
             levelCode: schema.levels.code,
           })
           .from(schema.testCases)
@@ -137,12 +133,10 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
         requirementSequenceNumber: req.sequenceNumber,
         levelName: req.levelName,
         levelCode: req.levelCode,
-        safetyClassification: req.safetyClassification,
         testCaseId: null,
         testCaseTitle: null,
         testCaseSequenceNumber: null,
         testCaseLevelCode: null,
-        testType: null,
         lastExecutionStatus: null,
         lastExecutionStartedAt: null,
         lastExecutionEnvironmentName: null,
@@ -160,12 +154,10 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
         requirementSequenceNumber: req.sequenceNumber,
         levelName: req.levelName,
         levelCode: req.levelCode,
-        safetyClassification: req.safetyClassification,
         testCaseId,
         testCaseTitle: testCase?.title ?? null,
         testCaseSequenceNumber: testCase?.sequenceNumber ?? null,
         testCaseLevelCode: testCase?.levelCode ?? null,
-        testType: testCase?.testType ?? null,
         lastExecutionStatus: lastExecution?.status ?? null,
         lastExecutionStartedAt: lastExecution?.startedAt ?? null,
         lastExecutionEnvironmentName: lastExecution?.environmentName ?? null,

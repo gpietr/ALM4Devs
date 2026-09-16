@@ -47,7 +47,6 @@ export default function SpiraImportTestCasesPage() {
 
   const [productId, setProductId] = useState("");
   const [testLevelId, setTestLevelId] = useState("");
-  const [testType, setTestType] = useState<"verification" | "validation">("verification");
   const [testCaseMapping, setTestCaseMapping] = useState<TestCaseMapping>(EMPTY_TEST_CASE_MAPPING);
   const [testCaseStartRow, setTestCaseStartRow] = useState(1);
   const [customFieldMapping, setCustomFieldMapping] = useState<Record<string, string>>({});
@@ -99,20 +98,7 @@ export default function SpiraImportTestCasesPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={testType} onValueChange={(v) => setTestType(v as "verification" | "validation")}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="verification">Verification</SelectItem>
-              <SelectItem value="validation">Validation</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Applied to every imported test case - Spira&apos;s own test case type doesn&apos;t
-          map onto this fixed choice, so it isn&apos;t read from Spira.
-        </p>
 
         <div className="mt-4 flex items-center gap-2">
           <Button
@@ -303,7 +289,6 @@ export default function SpiraImportTestCasesPage() {
                     const result = await runTestCaseImportMutation.mutateAsync({
                       productId,
                       levelId: testLevelId,
-                      testType,
                       mapping: {
                         title: testCaseMapping.title,
                         purpose: testCaseMapping.purpose || undefined,

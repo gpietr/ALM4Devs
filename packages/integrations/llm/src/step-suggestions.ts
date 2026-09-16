@@ -58,7 +58,6 @@ export interface StepSuggestionRequirement {
   title: string;
   description: string;
   background: string | null;
-  safetyClassification: string | null;
 }
 
 export interface StepSuggestionStep {
@@ -71,7 +70,6 @@ export interface StepSuggestionStep {
 
 export interface StepSuggestionRequest {
   testCaseTitle?: string;
-  testType?: "verification" | "validation";
   requirements: StepSuggestionRequirement[];
   requirementsTruncated: boolean;
   originalSteps: StepSuggestionStep[];
@@ -116,7 +114,7 @@ function buildSystemPrompt(req: StepSuggestionRequest): string {
     "You help draft and revise verification/validation test steps for a medical device " +
       "test case, working from a chat instruction and the product's requirements.",
     "",
-    `Test case: ${req.testCaseTitle ?? "(untitled)"}${req.testType ? ` (${req.testType})` : ""}`,
+    `Test case: ${req.testCaseTitle ?? "(untitled)"}`,
     "",
     "Requirements available for this product:",
   ];
@@ -124,7 +122,7 @@ function buildSystemPrompt(req: StepSuggestionRequest): string {
     lines.push("(none defined yet)");
   } else {
     for (const r of req.requirements) {
-      lines.push(`- ${r.itemId}: ${r.title}${r.safetyClassification ? ` [class ${r.safetyClassification}]` : ""}`);
+      lines.push(`- ${r.itemId}: ${r.title}`);
       lines.push(`  ${r.description}`);
       if (r.background) lines.push(`  Background: ${r.background}`);
     }

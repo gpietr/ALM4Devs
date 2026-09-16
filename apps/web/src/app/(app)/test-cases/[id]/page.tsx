@@ -5,8 +5,8 @@ import {
   asCustomFieldDefinitions,
   customFieldFormStateFromValues,
   type CustomFieldFormState,
+  type CustomFieldValueView,
   CustomFieldInputs,
-  formatCustomFieldValue,
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
 import { BulkGenerateDocumentButton } from "@/components/bulk-generate-document-button";
@@ -32,11 +32,13 @@ import { use, useEffect, useRef, useState } from "react";
  * out since it's a client-only React key (stable per step, not part of what gets saved).
  * `requirementIds` order matters here even though it may not to the server (order changes
  * alone would show as "dirty"), a reasonable tradeoff against the complexity of an
- * order-independent comparison for something that in practice never happens on its own. */
-function snapshotOf(title: string, testType: string, requirementIds: string[], steps: StepDraft[]): string {
+ * order-independent comparison for something that in practice never happens on its own.
+ * Custom field values are part of this same form/Save now (see updateTestCase.mutate
+ * below), so they're part of the same dirty check too - a test case has no versioning
+ * concept to keep them separate from, unlike a requirement's. */
+function snapshotOf(title: string, requirementIds: string[], steps: StepDraft[], customFieldState: CustomFieldFormState): string {
   return JSON.stringify({
     title,
-    testType,
     requirementIds,
     steps: steps.map((s) => ({
       id: s.id ?? null,
@@ -45,6 +47,7 @@ function snapshotOf(title: string, testType: string, requirementIds: string[], s
       purpose: s.purpose,
       requirementIds: s.requirementIds,
     })),
+    customFieldState,
   });
 }
 
@@ -64,20 +67,19 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   const startExecution = trpc.testCases.startExecution.useMutation({
     onSuccess: (result) => router.push(`/test-cases/${id}/executions/${result.execution.id}`),
   });
-  const updateCustomFieldValues = trpc.testCases.updateCustomFieldValues.useMutation({
-    onSuccess: () => utils.testCases.get.invalidate({ id }),
-  });
   const updateTestCase = trpc.testCases.update.useMutation({
     // Rebuilt from the mutation's own response + the variables just submitted, not a
     // refetch round-trip: `result.steps` comes back in the same order as `variables.steps`
     // was submitted (packages/core's updateTestCase processes them in array order), so
     // pairing them by index recovers each step's requirementIds - the response itself
     // doesn't echo links back, and a brand-new step's id isn't known until this response
-    // arrives anyway.
+    // arrives anyway. Custom field values aren't echoed back either (setCustomFieldValues
+    // returns no rows) - rebuilt from `variables.customFieldValues` (what was actually
+    // submitted) rather than the live `customFieldState` closure, for the same reason
+    // title/steps aren't: the user could still be typing when this resolves.
     onSuccess: (result, variables) => {
       utils.testCases.get.invalidate({ id });
       const newTitle = result.testCase.title;
-      const newTestType = result.testCase.testType as "verification" | "validation";
       const newRequirementIds = variables.requirementIds ?? [];
       const newSteps = result.steps.map((s, i) => ({
         id: s.id,
@@ -87,22 +89,30 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
         purpose: s.purpose ?? "",
         requirementIds: variables.steps[i]?.requirementIds ?? [],
       }));
+      const newCustomFieldState: CustomFieldFormState = Object.fromEntries(
+        (variables.customFieldValues ?? []).map((v) => [
+          v.fieldId,
+          // Reconstructing CustomFieldFormState's shape from what was actually submitted
+          // - a boolean stays a boolean (matches Switch's own value type), everything
+          // else (including a number, for an integer field) becomes its string form,
+          // same as CustomFieldInput's own text/number inputs already work with.
+          typeof v.value === "boolean" ? v.value : (v.value?.toString() ?? ""),
+        ]),
+      );
       setTitle(newTitle);
-      setTestType(newTestType);
       setRequirementIds(newRequirementIds);
       setSteps(newSteps);
-      setSavedSnapshot(snapshotOf(newTitle, newTestType, newRequirementIds, newSteps));
+      setCustomFieldState(newCustomFieldState);
+      setSavedSnapshot(snapshotOf(newTitle, newRequirementIds, newSteps, newCustomFieldState));
     },
   });
   const deleteTestCase = trpc.testCases.delete.useMutation();
 
   const [environmentId, setEnvironmentId] = useState("");
   const [title, setTitle] = useState("");
-  const [testType, setTestType] = useState<"verification" | "validation">("verification");
   const [requirementIds, setRequirementIds] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepDraft[]>([emptyStep()]);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
-  const [editingCustomFields, setEditingCustomFields] = useState(false);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
   // Bulk-select a few of this test case's own executions to zip up as separate reports
   // (backlog item 9.32) - declared here, unconditionally, not below the loading guard,
@@ -117,7 +127,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   // user may already be mid-edit on.
   const hasInitializedRef = useRef(false);
   function syncFromServer(
-    tc: { title: string; testType: string },
+    tc: { title: string },
     srvSteps: Array<{
       id: string;
       description: string;
@@ -126,8 +136,8 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       requirementLinks: { id: string }[];
     }>,
     directIds: string[],
+    customFieldValues: CustomFieldValueView[],
   ) {
-    const newTestType = tc.testType as "verification" | "validation";
     const newSteps = srvSteps.map((s) => ({
       id: s.id,
       key: s.id,
@@ -136,23 +146,24 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       purpose: s.purpose ?? "",
       requirementIds: s.requirementLinks.map((r) => r.id),
     }));
+    const newCustomFieldState = customFieldFormStateFromValues(customFieldValues);
     setTitle(tc.title);
-    setTestType(newTestType);
     setRequirementIds(directIds);
     setSteps(newSteps);
-    setSavedSnapshot(snapshotOf(tc.title, newTestType, directIds, newSteps));
+    setCustomFieldState(newCustomFieldState);
+    setSavedSnapshot(snapshotOf(tc.title, directIds, newSteps, newCustomFieldState));
   }
   useEffect(() => {
     if (hasInitializedRef.current || !detail.data) return;
     hasInitializedRef.current = true;
-    syncFromServer(detail.data.testCase, detail.data.steps, detail.data.directRequirementIds);
+    syncFromServer(detail.data.testCase, detail.data.steps, detail.data.directRequirementIds, detail.data.customFieldValues);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data]);
 
   // `savedSnapshot` is null until the first sync, so this stays false rather than flashing
   // "dirty" against the empty initial state on every load. Computed above the loading/error
   // returns below since hooks (including the guard it feeds) must run unconditionally.
-  const isDirty = savedSnapshot !== null && snapshotOf(title, testType, requirementIds, steps) !== savedSnapshot;
+  const isDirty = savedSnapshot !== null && snapshotOf(title, requirementIds, steps, customFieldState) !== savedSnapshot;
   useUnsavedChangesGuard(isDirty, "You have unsaved changes on this test case. Leave without saving?");
 
   if (detail.isLoading) return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-muted-foreground">Loading...</main>;
@@ -160,11 +171,11 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-destructive">{detail.error?.message}</main>;
   }
 
-  const { testCase, effectiveRequirementLinks, executions, customFieldValues } = detail.data;
+  const { testCase, effectiveRequirementLinks, executions } = detail.data;
   const levelName = levels.data?.find((l) => l.id === testCase.levelId)?.name ?? "Test Cases";
 
   function discardChanges() {
-    syncFromServer(testCase, detail.data!.steps, detail.data!.directRequirementIds);
+    syncFromServer(testCase, detail.data!.steps, detail.data!.directRequirementIds, detail.data!.customFieldValues);
   }
 
   return (
@@ -216,7 +227,6 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
           e.preventDefault();
           updateTestCase.mutate({
             testCaseId: id,
-            testType,
             title,
             requirementIds: requirementIds.length ? requirementIds : undefined,
             steps: steps.map((s) => ({
@@ -226,28 +236,21 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
               purpose: s.purpose || undefined,
               requirementIds: s.requirementIds.length ? s.requirementIds : undefined,
             })),
+            customFieldValues: toCustomFieldValuesInput(customFieldState),
           });
         }}
       >
         <p className="font-mono text-xs font-semibold text-primary">{formatItemId(testCase.levelCode, testCase.sequenceNumber)}</p>
-        <div className="flex gap-3">
-          <div className="flex-1 space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">Title</Label>
-            <Input required value={title} onChange={(e) => setTitle(e.target.value)} className="text-base font-semibold" />
-          </div>
-          <div className="w-44 space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">Type</Label>
-            <Select value={testType} onValueChange={(v) => setTestType(v as typeof testType)}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="verification">Verification</SelectItem>
-                <SelectItem value="validation">Validation</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground">Title</Label>
+          <Input required value={title} onChange={(e) => setTitle(e.target.value)} className="text-base font-semibold" />
         </div>
+
+        <CustomFieldInputs
+          fields={customFieldDefs}
+          state={customFieldState}
+          onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
+        />
 
         {effectiveRequirementLinks.length > 0 && (
           <p className="text-sm text-muted-foreground">
@@ -345,64 +348,6 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       </Card>
       {startExecution.error && <p className="mt-2 text-sm text-destructive">{startExecution.error.message}</p>}
 
-      {customFieldDefs.length > 0 && (
-        <Card className="mt-8 p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-foreground">Custom fields</h2>
-            {!editingCustomFields && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setCustomFieldState(customFieldFormStateFromValues(customFieldValues));
-                  setEditingCustomFields(true);
-                }}
-              >
-                Edit
-              </Button>
-            )}
-          </div>
-          {editingCustomFields ? (
-            <form
-              className="mt-3 space-y-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                updateCustomFieldValues.mutate(
-                  { testCaseId: id, values: toCustomFieldValuesInput(customFieldState) },
-                  { onSuccess: () => setEditingCustomFields(false) },
-                );
-              }}
-            >
-              <CustomFieldInputs
-                fields={customFieldDefs}
-                state={customFieldState}
-                onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
-              />
-              {updateCustomFieldValues.error && (
-                <p className="text-sm text-destructive">{updateCustomFieldValues.error.message}</p>
-              )}
-              <div className="flex gap-2">
-                <Button type="submit" disabled={updateCustomFieldValues.isPending}>
-                  Save
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setEditingCustomFields(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          ) : (
-            <dl className="mt-3 space-y-2 text-sm">
-              {customFieldValues.map((v) => (
-                <div key={v.fieldId} className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground">{v.name}</dt>
-                  <dd className="text-right text-foreground">{formatCustomFieldValue(v)}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </Card>
-      )}
-
       <h2 className="mt-10 text-sm font-medium text-foreground">Execution history</h2>
       <ul className="mt-3 divide-y divide-border overflow-hidden rounded-md border text-sm">
         {executions.map((ex) => (
@@ -448,7 +393,6 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       <AiToolsPanel
         productId={testCase.productId}
         testCaseTitle={title}
-        testType={testType}
         steps={steps}
         onAccept={setSteps}
         requirementOptions={requirementOptions.data ?? []}

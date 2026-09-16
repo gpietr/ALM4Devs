@@ -35,7 +35,6 @@ export async function buildTestCaseDocumentContext(db: TenantTx, tenantId: strin
     generatedAt: nowIso(),
     displayId: formatItemId(level.code, testCase.sequenceNumber),
     title: testCase.title,
-    testType: testCase.testType,
     levelName: level.name,
     steps: steps.map((s) => ({
       position: s.stepNumber,
@@ -126,7 +125,6 @@ export async function buildRequirementListDocumentContext(
     .select({
       id: schema.requirements.id,
       sequenceNumber: schema.requirements.sequenceNumber,
-      safetyClassification: schema.requirements.safetyClassification,
       title: schema.requirementVersions.title,
       description: schema.requirementVersions.description,
       background: schema.requirementVersions.background,
@@ -159,7 +157,6 @@ export async function buildRequirementListDocumentContext(
         title: r.title,
         description: r.description,
         background: r.background,
-        safetyClassification: r.safetyClassification,
         status: r.statusName,
         customFields: (customFieldsByRequirement.get(id) ?? []).map((f) => ({
           name: f.name,

@@ -31,7 +31,6 @@ const PLACEHOLDER_FIELDS: Record<Scope, PlaceholderField[]> = {
   test_case: [
     { path: "displayId" },
     { path: "title" },
-    { path: "testType" },
     { path: "levelName" },
     { path: "generatedAt" },
     { path: "#each steps", note: "loop" },
@@ -73,7 +72,6 @@ const PLACEHOLDER_FIELDS: Record<Scope, PlaceholderField[]> = {
     { path: "  this.title" },
     { path: "  this.description", html: true },
     { path: "  this.background", html: true },
-    { path: "  this.safetyClassification" },
     { path: "  this.status" },
     { path: "  #each this.customFields", note: "nested loop" },
     { path: "    this.name" },

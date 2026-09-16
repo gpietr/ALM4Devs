@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
+  seedDefaultCustomFields,
   seedDefaultEnvironments,
   seedDefaultLevels,
   seedDefaultStatuses,
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
     await seedDefaultTenantSettings(tx, tenant.id);
     await seedDefaultTestLevels(tx, tenant.id);
     await seedDefaultEnvironments(tx, tenant.id);
+    await seedDefaultCustomFields(tx, tenant.id);
   });
 
   try {

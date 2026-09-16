@@ -14,7 +14,6 @@ import { decrementSequenceCounterIfTip, nextSequenceNumber } from "./level-seque
 import { sanitizeRichText } from "./rich-text";
 import { getTestLevel } from "./test-levels";
 
-export type TestType = "verification" | "validation";
 export type StepResultStatus = "pass" | "fail" | "blocked";
 
 export interface TestStepInput {
@@ -41,7 +40,6 @@ export async function createTestCase(
     tenantId: string;
     productId: string;
     levelId: string;
-    testType: TestType;
     title: string;
     /** Direct test-case-level links, independent of any step link. */
     requirementIds?: string[];
@@ -70,7 +68,6 @@ export async function createTestCase(
       productId: params.productId,
       levelId: params.levelId,
       sequenceNumber,
-      testType: params.testType,
       title: params.title,
       createdBy: params.createdBy,
     })
@@ -150,7 +147,6 @@ export async function createTestCase(
     // (see requirements.ts) - self-describing even after a later level-code rename.
     payload: {
       title: params.title,
-      testType: params.testType,
       stepCount: steps.length,
       displayId: formatItemId(level.code, sequenceNumber),
     },
@@ -176,7 +172,6 @@ export async function createOrUpdateTestCaseFromImport(
     tenantId: string;
     productId: string;
     levelId: string;
-    testType: TestType;
     title: string;
     createdBy: string;
     source: ExternalSource;
@@ -216,7 +211,6 @@ export async function createOrUpdateTestCaseFromImport(
       tenantId: params.tenantId,
       productId: params.productId,
       levelId: params.levelId,
-      testType: params.testType,
       title: params.title,
       createdBy: params.createdBy,
       source: params.source,
@@ -389,9 +383,14 @@ export interface TestStepEditInput {
 }
 
 /**
- * Full-replace update for a test case: title, test type, case-level requirement links, and
- * the step list (edited in place, added, removed, and/or reordered - all in one call, since
- * the UI resubmits the complete desired step list rather than sending granular diffs).
+ * Full-replace update for a test case: title, custom field values, case-level requirement
+ * links, and the step list (edited in place, added, removed, and/or reordered - all in one
+ * call, since the UI resubmits the complete desired step list rather than sending granular
+ * diffs). Custom field values are folded into this single call - unlike a requirement's
+ * (which stay a separate mutation because they're not gated by version/status the way
+ * title/description are, see requirements.ts's updateCustomFieldValues), a test case has no
+ * versioning concept at all to keep separate from, so there's no reason to make the UI
+ * submit them in two calls.
  *
  * Test cases aren't versioned/locked the way requirements are (no approval workflow - see
  * TECH_STACK.md), so there's no "can this be edited" gate here; it's always editable. The
@@ -407,11 +406,11 @@ export async function updateTestCase(
   params: {
     tenantId: string;
     testCaseId: string;
-    testType: TestType;
     title: string;
     requirementIds?: string[];
     steps: TestStepEditInput[];
     actorUserId: string;
+    customFieldValues?: CustomFieldValueInput[];
   },
 ) {
   if (params.steps.length === 0) {
@@ -453,8 +452,10 @@ export async function updateTestCase(
 
   await db
     .update(schema.testCases)
-    .set({ title: params.title, testType: params.testType, updatedAt: new Date() })
+    .set({ title: params.title, updatedAt: new Date() })
     .where(eq(schema.testCases.id, params.testCaseId));
+
+  await setCustomFieldValues(db, params.tenantId, "test_case", params.testCaseId, params.customFieldValues ?? []);
 
   if (removedStepIds.length > 0) {
     await db.delete(schema.testSteps).where(inArray(schema.testSteps.id, removedStepIds));
@@ -527,10 +528,10 @@ export async function updateTestCase(
     action: "test_case.updated",
     entityType: "test_case",
     entityId: params.testCaseId,
-    payload: { title: params.title, testType: params.testType, stepCount: steps.length },
+    payload: { title: params.title, stepCount: steps.length },
   });
 
-  return { testCase: { ...existing, title: params.title, testType: params.testType }, steps };
+  return { testCase: { ...existing, title: params.title }, steps };
 }
 
 /** Adds any of `requirementIds` this test case isn't already linked to - additive only,
@@ -722,7 +723,6 @@ export async function getCoveringTestCases(db: TenantTx, tenantId: string, requi
       id: schema.testCases.id,
       sequenceNumber: schema.testCases.sequenceNumber,
       title: schema.testCases.title,
-      testType: schema.testCases.testType,
       levelCode: schema.levels.code,
     })
     .from(schema.testCases)

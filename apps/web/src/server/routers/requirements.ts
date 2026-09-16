@@ -138,7 +138,6 @@ export const requirementsRouter = router({
           .select({
             id: schema.requirements.id,
             sequenceNumber: schema.requirements.sequenceNumber,
-            safetyClassification: schema.requirements.safetyClassification,
             createdAt: schema.requirements.createdAt,
             title: schema.requirementVersions.title,
             versionNumber: schema.requirementVersions.versionNumber,
@@ -213,7 +212,6 @@ export const requirementsRouter = router({
           id: schema.requirements.id,
           sequenceNumber: schema.requirements.sequenceNumber,
           productId: schema.requirements.productId,
-          safetyClassification: schema.requirements.safetyClassification,
           parentRequirementId: schema.requirements.parentRequirementId,
           levelId: schema.requirements.levelId,
           levelName: schema.levels.name,
@@ -336,7 +334,6 @@ export const requirementsRouter = router({
       z.object({
         productId: z.string().uuid(),
         levelId: z.string().uuid(),
-        safetyClassification: z.enum(["A", "B", "C"]).optional(),
         parentRequirementId: z.string().uuid().optional(),
         title: z.string().trim().min(1).max(300),
         description: z.string().trim().min(1).max(10000),
@@ -352,7 +349,6 @@ export const requirementsRouter = router({
           tenantId,
           productId: input.productId,
           levelId: input.levelId,
-          safetyClassification: input.safetyClassification ?? null,
           parentRequirementId: input.parentRequirementId ?? null,
           title: input.title,
           description: input.description,

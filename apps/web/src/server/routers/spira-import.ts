@@ -41,7 +41,6 @@ const mappingSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   background: z.string().optional(),
-  safetyClassification: z.string().optional(),
   legacyId: z.string().optional(),
   // Our custom field id -> the Spira field key to read for it - see
   // RequirementFieldMapping.customFields (packages/integrations/spira/src/import.ts).
@@ -213,7 +212,6 @@ export const spiraImportRouter = router({
       z.object({
         productId: z.string().uuid(),
         levelId: z.string().uuid(),
-        testType: z.enum(["verification", "validation"]),
         mapping: testCaseMappingSchema,
         // Optional resume point for a run that was interrupted partway - not a page-size
         // limit. runSpiraTestCaseImport pages through the whole project on its own.
@@ -232,7 +230,6 @@ export const spiraImportRouter = router({
           tenantId,
           productId: input.productId,
           levelId: input.levelId,
-          testType: input.testType,
           createdBy: userId,
           mapping: input.mapping,
           startRow: input.startRow,

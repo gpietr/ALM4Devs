@@ -23,8 +23,6 @@ import { sanitizeRichText } from "./rich-text";
 import { getTenantSettings } from "./tenant-settings";
 import { getCoveringTestCases } from "./test-cases";
 
-export type SafetyClassification = "A" | "B" | "C";
-
 /** Called once, right after a tenant is created (see apps/web/src/app/api/register). */
 export async function seedDefaultStatuses(db: TenantTx, tenantId: string) {
   return db
@@ -107,7 +105,6 @@ export async function createRequirement(
     tenantId: string;
     productId: string;
     levelId: string;
-    safetyClassification?: SafetyClassification | null;
     parentRequirementId?: string | null;
     title: string;
     description: string;
@@ -155,7 +152,6 @@ export async function createRequirement(
       productId: params.productId,
       levelId: params.levelId,
       sequenceNumber,
-      safetyClassification: params.safetyClassification ?? null,
       parentRequirementId: params.parentRequirementId ?? null,
       createdBy: params.createdBy,
     })
@@ -273,9 +269,6 @@ export async function editDraftVersion(
  *   (`editDraftVersion`): a requirement that has moved past Draft isn't silently rewritten
  *   by a re-import just because the source changed. The row is left alone and the caller
  *   is told why, rather than the import failing outright or bypassing the workflow.
- * - **Safety classification is only set on first import** - the app has no metadata-only
- *   update path for it outside creation yet (a real gap, not a deliberate cut), so
- *   re-imports never touch it.
  */
 export async function createOrUpdateRequirementFromImport(
   db: TenantTx,
@@ -283,7 +276,6 @@ export async function createOrUpdateRequirementFromImport(
     tenantId: string;
     productId: string;
     levelId: string;
-    safetyClassification?: SafetyClassification | null;
     title: string;
     description: string;
     background?: string | null;
@@ -549,16 +541,15 @@ export const LLM_STEP_SUGGESTION_REQUIREMENT_LIMIT = 300;
 
 /** Not exposed as its own tRPC query - only consumed server-side by
  * testCases.suggestSteps (see apps/web/src/server/routers/test-cases.ts) to give the
- * model full requirement text (title/description/background/safety classification) to
- * act on, not just the id/title pair requirements.listAllByProduct returns for the
- * existing requirement-picker UI. */
+ * model full requirement text (title/description/background) to act on, not just the
+ * id/title pair requirements.listAllByProduct returns for the existing requirement-picker
+ * UI. */
 export async function listRequirementsForStepSuggestions(db: TenantTx, tenantId: string, productId: string) {
   const rows = await db
     .select({
       id: schema.requirements.id,
       sequenceNumber: schema.requirements.sequenceNumber,
       levelCode: schema.levels.code,
-      safetyClassification: schema.requirements.safetyClassification,
       title: schema.requirementVersions.title,
       description: schema.requirementVersions.description,
       background: schema.requirementVersions.background,

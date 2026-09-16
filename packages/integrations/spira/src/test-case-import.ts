@@ -3,7 +3,6 @@ import {
   type CustomFieldValueInput,
   ensureSequenceCounterAtLeast,
   type ImportUpsertAction,
-  type TestType,
 } from "@galm/core";
 import { type AppDb, withTenant } from "@galm/db";
 import { readSpiraField, type SpiraClient, type SpiraTestCase, type SpiraTestStep } from "./client";
@@ -157,7 +156,6 @@ interface RunSpiraTestCaseImportParams {
   tenantId: string;
   productId: string;
   levelId: string;
-  testType: TestType;
   createdBy: string;
   mapping: TestCaseFieldMapping;
   startRow?: number;
@@ -169,7 +167,6 @@ async function importOneTestCaseRow(
   tenantId: string,
   productId: string,
   levelId: string,
-  testType: TestType,
   createdBy: string,
   mapped: MappedTestCase,
   /** Only set on the ordered (legacyId-mapped) path - see runOrderedSpiraTestCaseImport. */
@@ -204,7 +201,6 @@ async function importOneTestCaseRow(
           tenantId,
           productId,
           levelId,
-          testType,
           title: mapped.title,
           createdBy,
           source: "spira",
@@ -251,8 +247,10 @@ async function importOneTestCaseRow(
  * onward, paging through the source automatically - same "import all in one click"
  * pattern as `runSpiraImport` for requirements. Continues past a per-row failure
  * (including "Spira test case has zero steps", since our model requires at least one)
- * rather than aborting the whole batch. `testType` and `levelId` are fixed choices applied
- * to every imported test case, not sourced from Spira - see the module docstring.
+ * rather than aborting the whole batch. `levelId` is a fixed choice applied to every
+ * imported test case, not sourced from Spira - see the module docstring. Test Type is a
+ * regular custom field now (see packages/core/src/custom-fields.ts), so - unlike before -
+ * it's mapped per row through `mapping.customFields` like everything else, not fixed here.
  *
  * **Idempotent by Spira id**: each test case (and each of its steps) records its Spira id
  * in `external_links` (see `createOrUpdateTestCaseFromImport`), so re-running this import
@@ -320,7 +318,6 @@ export async function runSpiraTestCaseImport(
           params.tenantId,
           params.productId,
           params.levelId,
-          params.testType,
           params.createdBy,
           mapped,
           null,
@@ -402,7 +399,6 @@ async function runOrderedSpiraTestCaseImport(
         params.tenantId,
         params.productId,
         params.levelId,
-        params.testType,
         params.createdBy,
         mapped,
         claimBefore,

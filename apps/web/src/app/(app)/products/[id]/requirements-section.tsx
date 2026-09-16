@@ -31,7 +31,6 @@ const ANY = "any";
 interface SortableRequirement {
   sequenceNumber: number;
   title: string;
-  safetyClassification: string | null;
   versionNumber: number;
   statusName: string;
   coveredByCount: number;
@@ -43,8 +42,6 @@ function compareRequirements(a: SortableRequirement, b: SortableRequirement, sor
       return a.sequenceNumber - b.sequenceNumber;
     case "title":
       return a.title.localeCompare(b.title);
-    case "safety":
-      return (a.safetyClassification ?? "").localeCompare(b.safetyClassification ?? "");
     case "version":
       return a.versionNumber - b.versionNumber;
     case "status":
@@ -57,10 +54,9 @@ function compareRequirements(a: SortableRequirement, b: SortableRequirement, sor
 }
 
 // Base UI's Select (unlike a native <select>) doesn't allow an item with value="" - it's
-// reserved to mean "no selection". "none" is the sentinel for optional dropdowns here,
-// translated back to undefined/empty at the point each is actually used.
+// reserved to mean "no selection". "none" is the sentinel for the optional parent
+// dropdown here, translated back to undefined at the point it's actually used.
 const NO_PARENT = "none";
-const NO_SAFETY_CLASS = "none";
 
 // Level selection is now the ProductContextStrip's job (the tabs live in the top bar,
 // driven by the ?level= query param) - this component just renders the create form + list
@@ -89,7 +85,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [background, setBackground] = useState("");
-  const [safetyClassification, setSafetyClassification] = useState<string>(NO_SAFETY_CLASS);
   const [parentRequirementId, setParentRequirementId] = useState(NO_PARENT);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
   // Starts closed - a "+ New {level}" button opens it on demand, rather than the form
@@ -103,7 +98,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   // these as query params to the backend.
   const { searchParams, setParams } = useUrlState();
   const statusFilter = searchParams.get("status") ?? ANY;
-  const safetyFilter = searchParams.get("safety") ?? ANY;
   const search = searchParams.get("q") ?? "";
   const sortBy = searchParams.get("sortBy");
   const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
@@ -124,9 +118,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   const visibleRequirements = useMemo(() => {
     let rows = requirements.data ?? [];
     if (statusFilter !== ANY) rows = rows.filter((r) => r.statusName === statusFilter);
-    if (safetyFilter !== ANY) {
-      rows = rows.filter((r) => (safetyFilter === NO_SAFETY_CLASS ? !r.safetyClassification : r.safetyClassification === safetyFilter));
-    }
     if (search.trim()) {
       const needle = search.trim().toLowerCase();
       rows = rows.filter((r) => r.title.toLowerCase().includes(needle));
@@ -135,7 +126,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
       rows = [...rows].sort((a, b) => compareRequirements(a, b, sortBy) * (sortDir === "desc" ? -1 : 1));
     }
     return rows;
-  }, [requirements.data, statusFilter, safetyFilter, search, sortBy, sortDir]);
+  }, [requirements.data, statusFilter, search, sortBy, sortDir]);
 
   if (levels.isLoading || !levelId) return <p className="text-sm text-muted-foreground">Loading...</p>;
 
@@ -152,8 +143,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                 {
                   productId,
                   levelId,
-                  safetyClassification:
-                    safetyClassification === NO_SAFETY_CLASS ? undefined : (safetyClassification as "A" | "B" | "C"),
                   parentRequirementId: parentRequirementId === NO_PARENT ? undefined : parentRequirementId,
                   title,
                   description,
@@ -175,17 +164,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
           >
             <h2 className="text-sm font-medium text-foreground">New {levelName}</h2>
             <div className="flex gap-3">
-              <Select value={safetyClassification} onValueChange={(v) => setSafetyClassification(v ?? NO_SAFETY_CLASS)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_SAFETY_CLASS}>No safety classification</SelectItem>
-                  <SelectItem value="A">Class A</SelectItem>
-                  <SelectItem value="B">Class B</SelectItem>
-                  <SelectItem value="C">Class C</SelectItem>
-                </SelectContent>
-              </Select>
               {!!parentCandidates.data?.length && (
                 <Select value={parentRequirementId} onValueChange={(v) => setParentRequirementId(v ?? NO_PARENT)}>
                   <SelectTrigger>
@@ -261,24 +239,12 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
               ))}
             </SelectContent>
           </Select>
-          <Select value={safetyFilter} onValueChange={(v) => setParams({ safety: v === ANY ? undefined : (v ?? undefined) })}>
-            <SelectTrigger className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ANY}>All safety classes</SelectItem>
-              <SelectItem value={NO_SAFETY_CLASS}>No safety classification</SelectItem>
-              <SelectItem value="A">Class A</SelectItem>
-              <SelectItem value="B">Class B</SelectItem>
-              <SelectItem value="C">Class C</SelectItem>
-            </SelectContent>
-          </Select>
-          {(statusFilter !== ANY || safetyFilter !== ANY || search) && (
+          {(statusFilter !== ANY || search) && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => setParams({ status: undefined, safety: undefined, q: undefined })}
+              onClick={() => setParams({ status: undefined, q: undefined })}
             >
               Clear filters
             </Button>
@@ -310,13 +276,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                 <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
                 <SortableTableHead label="Title" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
                 <SortableTableHead
-                  label="Safety class"
-                  sortKey="safety"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                />
-                <SortableTableHead
                   label="Version"
                   sortKey="version"
                   activeSortKey={sortBy}
@@ -346,7 +305,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
             <TableBody>
               {visibleRequirements.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7 + visibleCustomFields.length} className="text-center text-muted-foreground">
+                  <TableCell colSpan={6 + visibleCustomFields.length} className="text-center text-muted-foreground">
                     No requirements match these filters.
                   </TableCell>
                 </TableRow>
@@ -365,9 +324,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                     >
                       {r.title}
                     </Link>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {r.safetyClassification ? `Class ${r.safetyClassification}` : "—"}
                   </TableCell>
                   <TableCell>
                     <span className="font-mono font-semibold text-primary">v{r.versionNumber}</span>

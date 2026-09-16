@@ -31,7 +31,6 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
   const createTestCase = trpc.testCases.create.useMutation();
 
   const [levelId, setLevelId] = useState(initialLevelId);
-  const [testType, setTestType] = useState<"verification" | "validation">("verification");
   const [title, setTitle] = useState("");
   const [requirementIds, setRequirementIds] = useState<string[]>([]);
   const [steps, setSteps] = useState([emptyStep()]);
@@ -51,7 +50,6 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
             {
               productId,
               levelId,
-              testType,
               title,
               requirementIds: requirementIds.length ? requirementIds : undefined,
               steps: steps.map((s) => ({
@@ -79,15 +77,6 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
                   {l.name}
                 </SelectItem>
               ))}
-            </SelectContent>
-          </Select>
-          <Select value={testType} onValueChange={(v) => setTestType(v as typeof testType)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="verification">Verification</SelectItem>
-              <SelectItem value="validation">Validation</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -127,7 +116,6 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
       <AiToolsPanel
         productId={productId}
         testCaseTitle={title}
-        testType={testType}
         steps={steps}
         onAccept={setSteps}
         requirementOptions={requirementOptions.data ?? []}

@@ -59,14 +59,12 @@ const ACTION_VARIANT: Record<StepDiffAction, "success" | "info" | "destructive" 
 export function AiToolsPanel({
   productId,
   testCaseTitle,
-  testType,
   steps,
   onAccept,
   requirementOptions,
 }: {
   productId: string;
   testCaseTitle?: string;
-  testType?: "verification" | "validation";
   steps: StepDraft[];
   onAccept: (steps: StepDraft[]) => void;
   requirementOptions: RequirementOption[];
@@ -164,7 +162,6 @@ export function AiToolsPanel({
           <AiStepAssistBody
             productId={productId}
             testCaseTitle={testCaseTitle}
-            testType={testType}
             steps={steps}
             requirementOptions={requirementOptions}
             onAccept={onAccept}
@@ -183,14 +180,12 @@ interface ChatMessage {
 function AiStepAssistBody({
   productId,
   testCaseTitle,
-  testType,
   steps,
   requirementOptions,
   onAccept,
 }: {
   productId: string;
   testCaseTitle?: string;
-  testType?: "verification" | "validation";
   steps: StepDraft[];
   requirementOptions: RequirementOption[];
   onAccept: (steps: StepDraft[]) => void;
@@ -225,7 +220,6 @@ function AiStepAssistBody({
       {
         productId,
         testCaseTitle,
-        testType,
         originalSteps: activeBaseline.map((s) => ({
           key: s.key,
           description: s.description,

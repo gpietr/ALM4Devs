@@ -48,7 +48,6 @@ export interface RequirementFieldMapping {
   title: string;
   description: string;
   background?: string;
-  safetyClassification?: string;
   /** Optional: a custom Spira field holding a legacy/pre-migration id (e.g. a team's own
    * "ID" field from before they adopted this system). When mapped, `runSpiraImport`
    * switches to its ordered mode: every row is fetched up front, sorted by the number
@@ -67,18 +66,11 @@ export interface RequirementFieldMapping {
 
 export const REQUIRED_MAPPING_TARGETS = ["title", "description"] as const;
 
-function normalizeSafetyClassification(raw: string | null): "A" | "B" | "C" | null {
-  if (!raw) return null;
-  const upper = raw.trim().toUpperCase();
-  return upper === "A" || upper === "B" || upper === "C" ? upper : null;
-}
-
 export interface MappedRequirement {
   spiraId: number;
   title: string;
   description: string;
   background: string | null;
-  safetyClassification: "A" | "B" | "C" | null;
   /** Parsed from mapping.legacyId, or null if unmapped or unparseable - see
    * RequirementFieldMapping.legacyId. Shown in the preview so a team can confirm the
    * number it extracted before running the real import. */
@@ -105,9 +97,6 @@ export function applyMapping(
     title: readSpiraField(requirement, mapping.title) || `Spira requirement ${requirement.RequirementId}`,
     description: stripHtmlToPlainText(readSpiraField(requirement, mapping.description)),
     background: mapping.background ? readSpiraField(requirement, mapping.background) : null,
-    safetyClassification: normalizeSafetyClassification(
-      mapping.safetyClassification ? readSpiraField(requirement, mapping.safetyClassification) : null,
-    ),
     requestedSequenceNumber: mapping.legacyId
       ? parseLegacySequenceNumber(readSpiraField(requirement, mapping.legacyId))
       : null,
@@ -190,7 +179,6 @@ async function importOneRequirementRow(
         title: mapped.title,
         description: mapped.description || "(imported from Spira - no description mapped)",
         background: mapped.background,
-        safetyClassification: mapped.safetyClassification,
         createdBy,
         source: "spira",
         externalId: String(mapped.spiraId),

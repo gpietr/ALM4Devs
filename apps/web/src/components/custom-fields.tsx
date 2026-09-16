@@ -36,9 +36,9 @@ export interface CustomFieldDefinitionView {
 /** `settings.listCustomFields`'s inferred tRPC output types `fieldType` as plain
  * `string` (it comes off a `text` column - Drizzle/tRPC don't know about the CHECK
  * constraint restricting it), same as every other CHECK-constrained-but-DB-untyped
- * column elsewhere in this app (safetyClassification, testType, status.category, ...).
- * This is the one place that trusts the constraint and narrows it back for every caller,
- * rather than each call site repeating its own `as` cast. */
+ * column elsewhere in this app (status.category, custom_field_definitions.entity_type,
+ * ...). This is the one place that trusts the constraint and narrows it back for every
+ * caller, rather than each call site repeating its own `as` cast. */
 export function asCustomFieldDefinitions(
   rows: ReadonlyArray<Omit<CustomFieldDefinitionView, "fieldType"> & { fieldType: string }>,
 ): CustomFieldDefinitionView[] {

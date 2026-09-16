@@ -4,7 +4,6 @@ import {
   createTestCase,
   type CustomFieldValueInput,
   deleteTestCase,
-  DomainError,
   formatItemId,
   getEffectiveRequirementLinks,
   getExecutionWithSteps,
@@ -19,7 +18,6 @@ import {
   listTestLevels,
   recordStepResult,
   sanitizeRichText,
-  setCustomFieldValues,
   startExecution,
   updateTestCase,
 } from "@galm/core";
@@ -92,7 +90,6 @@ export const testCasesRouter = router({
             id: schema.testCases.id,
             sequenceNumber: schema.testCases.sequenceNumber,
             title: schema.testCases.title,
-            testType: schema.testCases.testType,
             createdAt: schema.testCases.createdAt,
           })
           .from(schema.testCases)
@@ -214,7 +211,6 @@ export const testCasesRouter = router({
       z.object({
         productId: z.string().uuid(),
         levelId: z.string().uuid(),
-        testType: z.enum(["verification", "validation"]),
         title: z.string().trim().min(1).max(300),
         requirementIds: z.array(z.string().uuid()).optional(),
         steps: z.array(testStepInputSchema).min(1),
@@ -229,7 +225,6 @@ export const testCasesRouter = router({
           tenantId,
           productId: input.productId,
           levelId: input.levelId,
-          testType: input.testType,
           title: input.title,
           requirementIds: input.requirementIds,
           steps: input.steps,
@@ -239,32 +234,14 @@ export const testCasesRouter = router({
       ).catch(toBadRequest);
     }),
 
-  /** Custom field values aren't versioned or status-gated (see custom-fields.ts) - a
-   * separate, always-available mutation from update, rather than folded into it, same
-   * split as requirements.ts's identical mutation. */
-  updateCustomFieldValues: protectedProcedure
-    .input(z.object({ testCaseId: z.string().uuid(), values: z.array(customFieldValueSchema) }))
-    .mutation(async ({ ctx, input }) => {
-      const tenantId = tenantOf(ctx);
-      return withTenant(db, tenantId, async (tx) => {
-        const [owned] = await tx
-          .select({ id: schema.testCases.id })
-          .from(schema.testCases)
-          .where(and(eq(schema.testCases.id, input.testCaseId), eq(schema.testCases.tenantId, tenantId)));
-        if (!owned) throw new DomainError("test case not found");
-        await setCustomFieldValues(tx, tenantId, "test_case", input.testCaseId, input.values as CustomFieldValueInput[]);
-        return { ok: true };
-      }).catch(toBadRequest);
-    }),
-
   update: protectedProcedure
     .input(
       z.object({
         testCaseId: z.string().uuid(),
-        testType: z.enum(["verification", "validation"]),
         title: z.string().trim().min(1).max(300),
         requirementIds: z.array(z.string().uuid()).optional(),
         steps: z.array(testStepInputSchema.extend({ id: z.string().uuid().optional() })).min(1),
+        customFieldValues: z.array(customFieldValueSchema).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -274,11 +251,11 @@ export const testCasesRouter = router({
         updateTestCase(tx, {
           tenantId,
           testCaseId: input.testCaseId,
-          testType: input.testType,
           title: input.title,
           requirementIds: input.requirementIds,
           steps: input.steps,
           actorUserId: userId,
+          customFieldValues: input.customFieldValues as CustomFieldValueInput[] | undefined,
         }),
       ).catch(toBadRequest);
     }),
@@ -364,7 +341,6 @@ export const testCasesRouter = router({
       z.object({
         productId: z.string().uuid(),
         testCaseTitle: z.string().optional(),
-        testType: z.enum(["verification", "validation"]).optional(),
         originalSteps: z.array(stepForAssistSchema),
         previousProposal: z.array(proposedStepSchema).optional(),
         history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })).max(50),
@@ -381,14 +357,12 @@ export const testCasesRouter = router({
           const model = await resolveModel(connection);
           const result = await proposeStepChanges(model, {
             testCaseTitle: input.testCaseTitle,
-            testType: input.testType,
             requirements: requirements.map((r) => ({
               id: r.id,
               itemId: formatItemId(r.levelCode, r.sequenceNumber),
               title: r.title,
               description: r.description,
               background: r.background,
-              safetyClassification: r.safetyClassification,
             })),
             requirementsTruncated: truncated,
             originalSteps: input.originalSteps.map((s) => ({

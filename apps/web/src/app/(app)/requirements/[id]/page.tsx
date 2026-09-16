@@ -7,7 +7,6 @@ import {
   customFieldFormStateFromValues,
   type CustomFieldFormState,
   CustomFieldInputs,
-  formatCustomFieldValue,
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
 import { RichTextEditor } from "@/components/rich-text-editor";
@@ -57,8 +56,12 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   const [background, setBackground] = useState("");
   const [pendingEsign, setPendingEsign] = useState<{ category: string; label: string } | null>(null);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
-  const [editingCustomFields, setEditingCustomFields] = useState(false);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
+  // Independent of `hasAutoOpenedRef`'s title/description/background sync below - custom
+  // field values aren't part of the draft-only edit flow (see updateCustomFieldValues),
+  // so they're seeded into local state as soon as they arrive, always editable, whatever
+  // the current version's status is.
+  const hasSyncedCustomFieldsRef = useRef(false);
 
   // Open straight into edit mode, not a read-only view first - a read-only landing only
   // makes sense once the current version is locked out of further edits (anything past
@@ -79,11 +82,17 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
     }
   }, [detail.data]);
 
+  useEffect(() => {
+    if (hasSyncedCustomFieldsRef.current || !detail.data) return;
+    hasSyncedCustomFieldsRef.current = true;
+    setCustomFieldState(customFieldFormStateFromValues(detail.data.customFieldValues));
+  }, [detail.data]);
+
   if (detail.isLoading) return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-muted-foreground">Loading...</main>;
   if (detail.error) return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-destructive">{detail.error.message}</main>;
   if (!detail.data) return null;
 
-  const { requirement, versions, children, coveringTestCases, customFieldValues } = detail.data;
+  const { requirement, versions, children, coveringTestCases } = detail.data;
   const current = versions[0];
   if (!current) return null;
 
@@ -120,7 +129,6 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
               {formatItemId(requirement.levelCode, requirement.sequenceNumber)}
             </span>{" "}
             · {requirement.levelName}
-            {requirement.safetyClassification ? ` · Class ${requirement.safetyClassification}` : ""}
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight">{current.title}</h1>
           {requirement.parentTitle && requirement.parentRequirementId && (
@@ -251,65 +259,35 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
             )}
           </>
         )}
-      </Card>
 
-      {customFieldDefs.length > 0 && (
-        <Card className="mt-6 p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-foreground">Custom fields</h2>
-            {!editingCustomFields && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setCustomFieldState(customFieldFormStateFromValues(customFieldValues));
-                  setEditingCustomFields(true);
-                }}
-              >
-                Edit
-              </Button>
+        {/* Custom field values, right alongside the content they describe rather than in
+            a separate section - a small sub-form of their own (border-t, matching the
+            Background sub-section above), not folded into the editDraft form above it:
+            unlike title/description/background, they aren't version-gated (see
+            updateCustomFieldValues) - always editable here, even once this version is
+            locked past Draft, same as they were before this was ever a form at all. */}
+        {customFieldDefs.length > 0 && (
+          <form
+            className="mt-4 space-y-3 border-t pt-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              updateCustomFieldValues.mutate({ requirementId: id, values: toCustomFieldValuesInput(customFieldState) });
+            }}
+          >
+            <CustomFieldInputs
+              fields={customFieldDefs}
+              state={customFieldState}
+              onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
+            />
+            {updateCustomFieldValues.error && (
+              <p className="text-sm text-destructive">{updateCustomFieldValues.error.message}</p>
             )}
-          </div>
-          {editingCustomFields ? (
-            <form
-              className="mt-3 space-y-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                updateCustomFieldValues.mutate(
-                  { requirementId: id, values: toCustomFieldValuesInput(customFieldState) },
-                  { onSuccess: () => setEditingCustomFields(false) },
-                );
-              }}
-            >
-              <CustomFieldInputs
-                fields={customFieldDefs}
-                state={customFieldState}
-                onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
-              />
-              {updateCustomFieldValues.error && (
-                <p className="text-sm text-destructive">{updateCustomFieldValues.error.message}</p>
-              )}
-              <div className="flex gap-2">
-                <Button type="submit" disabled={updateCustomFieldValues.isPending}>
-                  Save
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setEditingCustomFields(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          ) : (
-            <dl className="mt-3 space-y-2 text-sm">
-              {customFieldValues.map((v) => (
-                <div key={v.fieldId} className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground">{v.name}</dt>
-                  <dd className="text-right text-foreground">{formatCustomFieldValue(v)}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </Card>
-      )}
+            <Button type="submit" size="sm" disabled={updateCustomFieldValues.isPending}>
+              {updateCustomFieldValues.isPending ? "Saving..." : "Save custom fields"}
+            </Button>
+          </form>
+        )}
+      </Card>
 
       <div className="mt-6 flex flex-wrap items-center gap-2">
         {allowedTransitions.data?.allowed.map((t) => (

@@ -22,7 +22,6 @@ const ANY = "any";
 interface SortableTestCase {
   sequenceNumber: number;
   title: string;
-  testType: string;
   coversCount: number;
   createdAt: string | Date;
 }
@@ -33,8 +32,6 @@ function compareTestCases(a: SortableTestCase, b: SortableTestCase, sortBy: stri
       return a.sequenceNumber - b.sequenceNumber;
     case "title":
       return a.title.localeCompare(b.title);
-    case "type":
-      return a.testType.localeCompare(b.testType);
     case "covers":
       return a.coversCount - b.coversCount;
     case "created":
@@ -59,7 +56,6 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
   // Same URL-driven filter/sort pattern as requirements-section.tsx - see its comment and
   // use-url-state.ts.
   const { searchParams, setParams } = useUrlState();
-  const typeFilter = searchParams.get("type") ?? ANY;
   const search = searchParams.get("q") ?? "";
   const sortBy = searchParams.get("sortBy");
   const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
@@ -76,7 +72,6 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
 
   const visibleTestCases = useMemo(() => {
     let rows = testCases.data ?? [];
-    if (typeFilter !== ANY) rows = rows.filter((tc) => tc.testType === typeFilter);
     if (search.trim()) {
       const needle = search.trim().toLowerCase();
       rows = rows.filter((tc) => tc.title.toLowerCase().includes(needle));
@@ -85,7 +80,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
       rows = [...rows].sort((a, b) => compareTestCases(a, b, sortBy) * (sortDir === "desc" ? -1 : 1));
     }
     return rows;
-  }, [testCases.data, typeFilter, search, sortBy, sortDir]);
+  }, [testCases.data, search, sortBy, sortDir]);
 
   // Bulk selection for "generate a report per selected test case, zipped" (backlog item
   // 9.32) - independent of the filters above (a selected row stays selected if it's
@@ -131,18 +126,8 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
             placeholder="Search title..."
             className="h-8 w-48"
           />
-          <Select value={typeFilter} onValueChange={(v) => setParams({ type: v === ANY ? undefined : (v ?? undefined) })}>
-            <SelectTrigger className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ANY}>All types</SelectItem>
-              <SelectItem value="verification">Verification</SelectItem>
-              <SelectItem value="validation">Validation</SelectItem>
-            </SelectContent>
-          </Select>
-          {(typeFilter !== ANY || search) && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setParams({ type: undefined, q: undefined })}>
+          {search && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => setParams({ q: undefined })}>
               Clear filters
             </Button>
           )}
@@ -180,7 +165,6 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                 </TableHead>
                 <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
                 <SortableTableHead label="Title" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
-                <SortableTableHead label="Type" sortKey="type" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
                 <SortableTableHead
                   label="Covers"
                   sortKey="covers"
@@ -203,7 +187,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
             <TableBody>
               {visibleTestCases.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6 + visibleCustomFields.length} className="text-center text-muted-foreground">
+                  <TableCell colSpan={5 + visibleCustomFields.length} className="text-center text-muted-foreground">
                     No test cases match these filters.
                   </TableCell>
                 </TableRow>
@@ -231,9 +215,6 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                     >
                       {tc.title}
                     </Link>
-                  </TableCell>
-                  <TableCell className="text-xs uppercase tracking-wide text-muted-foreground">
-                    {tc.testType}
                   </TableCell>
                   <TableCell>
                     {tc.coversCount > 0 ? (
