@@ -1,0 +1,17 @@
+{
+  "name": "@galm/db",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "migrate": "bun run src/migrate.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.6"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.6"
+  }
+}

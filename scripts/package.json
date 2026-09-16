@@ -1,0 +1,13 @@
+{
+  "name": "@galm/scripts",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "dependencies": {
+    "@galm/core": "workspace:*",
+    "@galm/db": "workspace:*",
+    "@galm/documents": "workspace:*",
+    "@galm/integrations-spira": "workspace:*",
+    "drizzle-orm": "^0.44.6"
+  }
+}

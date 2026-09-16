@@ -1,0 +1,16 @@
+{
+  "name": "@galm/core",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@galm/db": "workspace:*",
+    "drizzle-orm": "^0.44.6",
+    "sanitize-html": "^2.13.1"
+  },
+  "devDependencies": {
+    "@types/sanitize-html": "^2.13.0"
+  }
+}

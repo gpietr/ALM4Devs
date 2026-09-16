@@ -1,0 +1,12 @@
+{
+  "name": "@galm/documents",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "handlebars": "^4.7.8",
+    "jszip": "^3.10.1"
+  }
+}

@@ -1,0 +1,1 @@
+ALTER TABLE "document_templates" ADD COLUMN "filename_template" text;

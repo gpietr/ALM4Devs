@@ -1,0 +1,1 @@
+ALTER TABLE "requirement_versions" ADD COLUMN "background" text;

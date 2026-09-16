@@ -1,0 +1,27 @@
+{
+  "name": "galm",
+  "private": true,
+  "version": "0.0.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/integrations/*",
+    "scripts"
+  ],
+  "scripts": {
+    "typecheck": "for d in packages/db packages/storage packages/jobs packages/documents packages/core packages/integrations/spira apps/web apps/worker scripts tests; do echo \"--- $d ---\"; (cd $d && bunx tsc --noEmit -p tsconfig.json) || exit 1; done",
+    "test:e2e": "bun test tests/e2e.test.ts",
+    "db:generate": "cd packages/db && bunx drizzle-kit generate",
+    "db:migrate": "bun run --filter=@galm/db migrate",
+    "db:seed": "bun run scripts/seed.ts",
+    "db:backfill-tenant-defaults": "bun run scripts/backfill-tenant-defaults.ts",
+    "verify:audit-immutability": "bun run scripts/verify-audit-immutability.ts",
+    "verify:walking-skeleton": "./scripts/verify-walking-skeleton.sh",
+    "dev:web": "bun run --filter=@galm/web dev",
+    "dev:worker": "bun run --filter=@galm/worker dev"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.7.2"
+  }
+}

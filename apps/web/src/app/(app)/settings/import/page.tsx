@@ -1,0 +1,163 @@
+"use client";
+
+import { TopBar } from "@/components/context-strip";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { trpc } from "@/lib/trpc-client";
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+/**
+ * The Spira import hub: connection setup only, plus navigation into the two actual import
+ * screens (/settings/import/requirements, /settings/import/test-cases). Previously this
+ * page held the connection form AND both entire import flows (target/mapping/preview/run,
+ * twice) stacked on one long scroll - unwieldy on its own, and only getting longer as
+ * mapping options grow (see the Legacy ID field added since). Split so each import job is
+ * its own screen with its own URL, and the connection - shared by both - lives in exactly
+ * one place instead of being re-editable from two.
+ */
+export default function SpiraImportHubPage() {
+  const utils = trpc.useUtils();
+  const connection = trpc.spiraImport.getConnection.useQuery();
+  const saveConnection = trpc.spiraImport.saveConnection.useMutation({
+    onSuccess: () => utils.spiraImport.getConnection.invalidate(),
+  });
+  const testConnection = trpc.spiraImport.testConnection.useMutation();
+
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiVersion, setApiVersion] = useState("v6_0");
+  const [username, setUsername] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [projectId, setProjectId] = useState("");
+
+  useEffect(() => {
+    if (connection.data) {
+      setBaseUrl(connection.data.baseUrl);
+      setApiVersion(connection.data.apiVersion);
+      setUsername(connection.data.username);
+      setProjectId(String(connection.data.projectId));
+    }
+  }, [connection.data]);
+
+  return (
+    <>
+      <TopBar />
+      <main className="mx-auto max-w-3xl px-4 py-10">
+      <Link href="/settings" className="text-sm text-muted-foreground underline underline-offset-2">
+        ← Settings
+      </Link>
+      <h1 className="mt-2 text-xl font-semibold tracking-tight">Import from Spira</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Save a connection here once, then import requirements and test cases from their own
+        screens below - each is a one-time import - review the preview, then run it. Import
+        all pages through the whole project automatically in one run.
+      </p>
+
+      {/* --- Connection --- */}
+      <Card className="mt-8 p-4">
+        <h2 className="text-sm font-medium text-foreground">Connection</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Base URL is the full path up to and including <code>RestService.svc</code> - copy
+          it from your Spira instance&apos;s own REST API documentation page, since it
+          differs between Cloud and self-hosted installs.
+        </p>
+        <form
+          className="mt-3 grid grid-cols-2 gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            saveConnection.mutate({
+              baseUrl,
+              apiVersion,
+              username,
+              apiKey: apiKey || undefined,
+              projectId: Number(projectId),
+            });
+          }}
+        >
+          <Label className="col-span-2 flex-col items-start gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Base URL</span>
+            <Input
+              required
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://mycompany.spiraservice.net/Spira/Services/v6_0/RestService.svc"
+            />
+          </Label>
+          <Label className="flex-col items-start gap-1">
+            <span className="text-xs font-medium text-muted-foreground">API version</span>
+            <Input required value={apiVersion} onChange={(e) => setApiVersion(e.target.value)} />
+          </Label>
+          <Label className="flex-col items-start gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Project ID (numeric)</span>
+            <Input required type="number" value={projectId} onChange={(e) => setProjectId(e.target.value)} />
+          </Label>
+          <Label className="flex-col items-start gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Username</span>
+            <Input required value={username} onChange={(e) => setUsername(e.target.value)} />
+          </Label>
+          <Label className="flex-col items-start gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              API key {connection.data?.hasApiKey && "(leave blank to keep the saved one)"}
+            </span>
+            <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          </Label>
+          <div className="col-span-2 flex items-center gap-2">
+            <Button type="submit" disabled={saveConnection.isPending}>
+              {saveConnection.isPending ? "Saving..." : "Save connection"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={testConnection.isPending || !connection.data}
+              onClick={() => testConnection.mutate()}
+            >
+              {testConnection.isPending ? "Testing..." : "Test connection"}
+            </Button>
+          </div>
+        </form>
+        {saveConnection.error && <p className="mt-2 text-sm text-destructive">{saveConnection.error.message}</p>}
+        {testConnection.isSuccess && (
+          <p className="mt-2 text-sm text-emerald-700">Connected - project: {testConnection.data.projectName}</p>
+        )}
+        {testConnection.error && <p className="mt-2 text-sm text-destructive">{testConnection.error.message}</p>}
+      </Card>
+
+      {/* --- Where to go next --- */}
+      <div className="mt-8 grid gap-3 sm:grid-cols-2">
+        <Link
+          href="/settings/import/requirements"
+          className="group flex flex-col justify-between rounded-lg border bg-card p-4 hover:bg-muted"
+        >
+          <div>
+            <h2 className="text-sm font-medium text-foreground">Import requirements</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Map Title, Description, and optional fields; choose the product and level.
+            </p>
+          </div>
+          <span className={buttonVariants({ variant: "outline", size: "sm", className: "mt-3 w-fit" })}>
+            Go <ArrowRight className="ml-1 size-3.5" />
+          </span>
+        </Link>
+        <Link
+          href="/settings/import/test-cases"
+          className="group flex flex-col justify-between rounded-lg border bg-card p-4 hover:bg-muted"
+        >
+          <div>
+            <h2 className="text-sm font-medium text-foreground">Import test cases</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Map Title and optional fields; every step&apos;s Description and Expected
+              Result import automatically.
+            </p>
+          </div>
+          <span className={buttonVariants({ variant: "outline", size: "sm", className: "mt-3 w-fit" })}>
+            Go <ArrowRight className="ml-1 size-3.5" />
+          </span>
+        </Link>
+      </div>
+      </main>
+    </>
+  );
+}

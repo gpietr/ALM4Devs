@@ -1,0 +1,73 @@
+name: galm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_superuser_dev_password
+      POSTGRES_DB: galm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-roles.sql:/docker-entrypoint-initdb.d/00-init-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d galm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: applies Drizzle migrations + hand-written RLS/trigger SQL as the
+  # migration-owner role, then exits. Run explicitly, not part of default `up`:
+  #   docker compose --profile migrate run --rm migrate
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/db/Dockerfile
+    profiles: ["migrate"]
+    env_file: .env
+    # .env's DATABASE_MIGRATION_URL uses `localhost`, correct for the host-side scripts
+    # under /scripts (seed.ts etc.) connecting via the published port below. Containers on
+    # the compose network must reach Postgres by service name instead - overridden here
+    # since `environment:` takes precedence over `env_file` for the same key.
+    environment:
+      DATABASE_MIGRATION_URL: postgres://galm_migrator:migrator_dev_password@postgres:5432/galm
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://app_runtime:app_runtime_dev_password@postgres:5432/galm
+    ports:
+      - "3000:3000"
+    volumes:
+      - evidence:/data/evidence
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://app_runtime:app_runtime_dev_password@postgres:5432/galm
+    volumes:
+      - evidence:/data/evidence
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  evidence:

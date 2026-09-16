@@ -1,0 +1,217 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light;
+  /* "Slate & Indigo" - the direction picked from the Galm Visual Style Options review
+   * artifact over the earlier "deep teal" (see TECH_STACK.md). Two things changed
+   * together, not just the hue: the page background is a faint cool slate, not stark
+   * white (that was doing as much of the "generic SaaS" work as the color choice), and
+   * --card stays crisp white so real panels (forms, the Spira connection block) sit
+   * visibly above the page instead of blending into it. */
+  --background: oklch(0.965 0.006 275);
+  --foreground: oklch(0.19 0.02 275);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.19 0.02 275);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.19 0.02 275);
+  --primary: oklch(0.36 0.045 265);
+  --primary-foreground: oklch(0.985 0 0);
+  /* A literal darken-on-hover (color-mix with black), not an opacity fade - an opacity
+   * fade against this light a background reads as the button washing out, not deepening.
+   * Exposed as the `bg-primary-hover` utility via the @theme inline mapping below. */
+  --primary-hover: color-mix(in oklch, oklch(0.36 0.045 265) 88%, black 12%);
+  --secondary: oklch(0.93 0.008 275);
+  --secondary-foreground: oklch(0.19 0.02 275);
+  --muted: oklch(0.93 0.008 275);
+  --muted-foreground: oklch(0.5 0.02 275);
+  /* Shadcn's own "interactive highlight" token (dropdown/select item hover) - tinted
+   * toward --primary instead of plain neutral, so menus/selects and the button hovers
+   * below read as one family instead of the accent living only on the primary button. */
+  --accent: color-mix(in oklch, oklch(0.36 0.045 265) 10%, white);
+  --accent-foreground: oklch(0.36 0.045 265);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.89 0.01 275);
+  --input: oklch(0.82 0.014 275);
+  --ring: color-mix(in oklch, oklch(0.36 0.045 265) 55%, transparent);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  /* Tightened from shadcn's default 0.625rem (~14px card corners) - "one shape language,
+   * tighter" from the same review artifact. This one variable drives the whole
+   * --radius-sm/md/lg/xl scale below, so every rounded-* utility across every component
+   * moved together without touching each component file. */
+  --radius: 0.375rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+/* Antialiasing only - background/text color come from the @layer base body rule below
+ * (bg-background/text-foreground), which shadcn's init added. This used to also set
+ * bg-neutral-50/text-neutral-900 directly on body, unlayered - which silently won over
+ * the token-based @layer base rule (unlayered CSS always beats layered CSS regardless of
+ * source order), making the token system inert. Keeping only antialiasing here avoids
+ * that conflict entirely instead of fighting over the same properties in two places. */
+body {
+  @apply antialiased;
+}
+
+/* The read-only rich-text renderer (rich-text-view.tsx) - the editor itself (Tiptap, via
+ * shadcn-minimal-tiptap) has its own styles in components/ui/minimal-tiptap/styles, which
+ * repeats the break-word rule below for the same reason.
+ *
+ * overflow-wrap/word-wrap: break-word so a long unbroken string (a URL, an id, a word with
+ * no spaces) wraps inside its container instead of overflowing it - table cells and the
+ * compact test-step columns in particular are narrow enough that this matters routinely,
+ * not just for pathological input. word-wrap is the legacy alias, kept alongside
+ * overflow-wrap for older engines; modern browsers only need the standard property. */
+.rte-content {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+.rte-content p {
+  margin: 0.25rem 0;
+}
+.rte-content ul,
+.rte-content ol {
+  margin: 0.25rem 0 0.25rem 1.25rem;
+}
+.rte-content ul {
+  list-style: disc;
+}
+.rte-content ol {
+  list-style: decimal;
+}
+.rte-content table {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+.rte-content th,
+.rte-content td {
+  border: 1px solid #d4d4d4;
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
+.rte-content th {
+  background: #f5f5f5;
+  font-weight: 600;
+}
+.rte-content img {
+  max-width: 100%;
+  border-radius: 0.25rem;
+}
+.rte-content blockquote {
+  border-left: 3px solid #d4d4d4;
+  padding-left: 0.75rem;
+  color: #525252;
+}
+.rte-content code {
+  background: #f5f5f5;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.8125rem;
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

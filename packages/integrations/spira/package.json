@@ -1,0 +1,16 @@
+{
+  "name": "@galm/integrations-spira",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@galm/core": "workspace:*",
+    "@galm/db": "workspace:*",
+    "sanitize-html": "^2.13.1"
+  },
+  "devDependencies": {
+    "@types/sanitize-html": "^2.13.0"
+  }
+}

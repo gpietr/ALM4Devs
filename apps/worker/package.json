@@ -1,0 +1,14 @@
+{
+  "name": "@galm/worker",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@galm/db": "workspace:*",
+    "@galm/jobs": "workspace:*"
+  }
+}
