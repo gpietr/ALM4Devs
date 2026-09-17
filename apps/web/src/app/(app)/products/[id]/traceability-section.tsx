@@ -1,9 +1,8 @@
 "use client";
 
+import { ColumnPicker } from "@/components/column-picker";
 import {
   asCustomFieldDefinitions,
-  type CustomFieldDefinitionView,
-  CustomFieldColumnPicker,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
 import { Frame } from "@/components/frame";
@@ -14,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
+import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Download } from "lucide-react";
@@ -21,6 +21,15 @@ import Link from "next/link";
 import { useMemo } from "react";
 
 const ANY = "any";
+
+const BUILTIN_COLUMNS: ListColumn[] = [
+  { id: "reqId", label: "ID" },
+  { id: "requirement", label: "Requirement" },
+  { id: "testId", label: "Test ID" },
+  { id: "testCase", label: "Test Case" },
+  { id: "lastExecution", label: "Last Execution" },
+  { id: "status", label: "Status" },
+];
 
 interface MatrixRow {
   requirementSequenceNumber: number;
@@ -88,19 +97,28 @@ export function TraceabilitySection({ productId }: { productId: string }) {
   const search = searchParams.get("q") ?? "";
   const sortBy = searchParams.get("sortBy");
   const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
-  const columnIds = useMemo(() => searchParams.get("columns")?.split(",").filter(Boolean) ?? [], [searchParams]);
-  const visibleReqFields = useMemo(() => reqCustomFields.filter((f) => columnIds.includes(f.id)), [reqCustomFields, columnIds]);
-  const visibleTcFields = useMemo(() => tcCustomFields.filter((f) => columnIds.includes(f.id)), [tcCustomFields, columnIds]);
-  // One combined picker for both sides, prefixed so "Req: Risk" and "TC: Risk" (two
-  // different fields that happen to share a name across entity types) are still
-  // distinguishable in the checklist - the prefix is display-only, not part of the id.
-  const pickerFields: CustomFieldDefinitionView[] = useMemo(
+  // One picker for built-in columns and both sides' tenant-defined fields. Req/TC
+  // prefixes on the labels distinguish two fields that happen to share a name; the
+  // ids stay the definition UUIDs (unique across entity types).
+  const columns = useMemo<ListColumn[]>(
     () => [
-      ...reqCustomFields.map((f) => ({ ...f, name: `Req: ${f.name}` })),
-      ...tcCustomFields.map((f) => ({ ...f, name: `TC: ${f.name}` })),
+      ...BUILTIN_COLUMNS,
+      ...reqCustomFields.map((f) => ({
+        id: f.id,
+        label: `Req: ${f.name}`,
+        defaultVisible: f.name === "Safety Classification",
+      })),
+      ...tcCustomFields.map((f) => ({ id: f.id, label: `TC: ${f.name}`, defaultVisible: false })),
     ],
     [reqCustomFields, tcCustomFields],
   );
+  const columnIds = useMemo(
+    () => parseColumnParam(searchParams.get("columns"), columns),
+    [searchParams, columns],
+  );
+  const visible = useMemo(() => new Set(columnIds), [columnIds]);
+  const visibleReqFields = useMemo(() => reqCustomFields.filter((f) => visible.has(f.id)), [reqCustomFields, visible]);
+  const visibleTcFields = useMemo(() => tcCustomFields.filter((f) => visible.has(f.id)), [tcCustomFields, visible]);
 
   function onSort(key: string) {
     if (sortBy === key) setParams({ sortDir: sortDir === "asc" ? "desc" : "asc" });
@@ -218,10 +236,10 @@ export function TraceabilitySection({ productId }: { productId: string }) {
               Clear filters
             </Button>
           )}
-          <CustomFieldColumnPicker
-            fields={pickerFields}
+          <ColumnPicker
+            columns={columns}
             selectedIds={columnIds}
-            onChange={(ids) => setParams({ columns: ids.length ? ids.join(",") : undefined })}
+            onChange={(ids) => setParams({ columns: serializeColumnParam(ids, columns) })}
           />
         </div>
       )}
@@ -231,44 +249,54 @@ export function TraceabilitySection({ productId }: { productId: string }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <SortableTableHead
-                  label="ID"
-                  sortKey="reqId"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                  className="w-28"
-                />
-                <SortableTableHead
-                  label="Requirement"
-                  sortKey="requirement"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                />
-                <TableHead className="w-28">Test ID</TableHead>
-                <SortableTableHead
-                  label="Test Case"
-                  sortKey="testCase"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                />
-                <SortableTableHead
-                  label="Last Execution"
-                  sortKey="lastExecution"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                />
-                <SortableTableHead
-                  label="Status"
-                  sortKey="status"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                  className="w-28"
-                />
+                {visible.has("reqId") && (
+                  <SortableTableHead
+                    label="ID"
+                    sortKey="reqId"
+                    activeSortKey={sortBy}
+                    direction={sortDir}
+                    onSort={onSort}
+                    className="w-28"
+                  />
+                )}
+                {visible.has("requirement") && (
+                  <SortableTableHead
+                    label="Requirement"
+                    sortKey="requirement"
+                    activeSortKey={sortBy}
+                    direction={sortDir}
+                    onSort={onSort}
+                  />
+                )}
+                {visible.has("testId") && <TableHead className="w-28">Test ID</TableHead>}
+                {visible.has("testCase") && (
+                  <SortableTableHead
+                    label="Test Case"
+                    sortKey="testCase"
+                    activeSortKey={sortBy}
+                    direction={sortDir}
+                    onSort={onSort}
+                  />
+                )}
+                {visible.has("lastExecution") && (
+                  <SortableTableHead
+                    label="Last Execution"
+                    sortKey="lastExecution"
+                    activeSortKey={sortBy}
+                    direction={sortDir}
+                    onSort={onSort}
+                  />
+                )}
+                {visible.has("status") && (
+                  <SortableTableHead
+                    label="Status"
+                    sortKey="status"
+                    activeSortKey={sortBy}
+                    direction={sortDir}
+                    onSort={onSort}
+                    className="w-28"
+                  />
+                )}
                 {visibleReqFields.map((f) => (
                   <TableHead key={f.id}>Req: {f.name}</TableHead>
                 ))}
@@ -281,7 +309,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
               {visibleRows.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6 + visibleReqFields.length + visibleTcFields.length}
+                    colSpan={Math.max(columnIds.length, 1)}
                     className="text-center text-muted-foreground"
                   >
                     No rows match these filters.
@@ -290,53 +318,65 @@ export function TraceabilitySection({ productId }: { productId: string }) {
               )}
               {visibleRows.map((row, i) => (
                 <TableRow key={`${row.requirementId}-${row.testCaseId ?? "none"}-${i}`}>
-                  <TableCell>
-                    <span className="font-mono text-[13px] font-medium text-foreground" title={row.levelName}>
-                      {formatItemId(row.levelCode, row.requirementSequenceNumber)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="max-w-xs whitespace-normal">
-                    <Link
-                      href={`/requirements/${row.requirementId}`}
-                      className="text-foreground hover:underline"
-                    >
-                      {row.requirementTitle}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    {row.testCaseId && (
-                      <span className="font-mono text-[13px] font-medium text-foreground">
-                        {formatItemId(row.testCaseLevelCode!, row.testCaseSequenceNumber!)}
+                  {visible.has("reqId") && (
+                    <TableCell>
+                      <span className="font-mono text-[13px] font-medium text-foreground" title={row.levelName}>
+                        {formatItemId(row.levelCode, row.requirementSequenceNumber)}
                       </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="max-w-xs whitespace-normal">
-                    {row.testCaseId ? (
+                    </TableCell>
+                  )}
+                  {visible.has("requirement") && (
+                    <TableCell className="max-w-xs whitespace-normal">
                       <Link
-                        href={`/test-cases/${row.testCaseId}`}
+                        href={`/requirements/${row.requirementId}`}
                         className="text-foreground hover:underline"
                       >
-                        {row.testCaseTitle}
+                        {row.requirementTitle}
                       </Link>
-                    ) : (
-                      <span className="text-muted-foreground">Not covered</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {row.lastExecutionStartedAt ? (
-                      <>
-                        {new Date(row.lastExecutionStartedAt).toLocaleDateString()}
-                        {row.lastExecutionEnvironmentName ? ` · ${row.lastExecutionEnvironmentName}` : ""}
-                      </>
-                    ) : row.testCaseId ? (
-                      "Never run"
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {row.lastExecutionStatus ? <ResultBadge status={row.lastExecutionStatus} /> : <span className="text-muted-foreground">—</span>}
-                  </TableCell>
+                    </TableCell>
+                  )}
+                  {visible.has("testId") && (
+                    <TableCell>
+                      {row.testCaseId && (
+                        <span className="font-mono text-[13px] font-medium text-foreground">
+                          {formatItemId(row.testCaseLevelCode!, row.testCaseSequenceNumber!)}
+                        </span>
+                      )}
+                    </TableCell>
+                  )}
+                  {visible.has("testCase") && (
+                    <TableCell className="max-w-xs whitespace-normal">
+                      {row.testCaseId ? (
+                        <Link
+                          href={`/test-cases/${row.testCaseId}`}
+                          className="text-foreground hover:underline"
+                        >
+                          {row.testCaseTitle}
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">Not covered</span>
+                      )}
+                    </TableCell>
+                  )}
+                  {visible.has("lastExecution") && (
+                    <TableCell className="text-muted-foreground">
+                      {row.lastExecutionStartedAt ? (
+                        <>
+                          {new Date(row.lastExecutionStartedAt).toLocaleDateString()}
+                          {row.lastExecutionEnvironmentName ? ` · ${row.lastExecutionEnvironmentName}` : ""}
+                        </>
+                      ) : row.testCaseId ? (
+                        "Never run"
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                  )}
+                  {visible.has("status") && (
+                    <TableCell>
+                      {row.lastExecutionStatus ? <ResultBadge status={row.lastExecutionStatus} /> : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                  )}
                   {visibleReqFields.map((f) => (
                     <TableCell key={f.id} className="text-muted-foreground">
                       {formatCustomFieldValue(

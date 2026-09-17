@@ -1,20 +1,19 @@
 "use client";
 
-import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { SlidersHorizontal } from "lucide-react";
 
 /**
- * Shared across every place tenant-defined custom fields (backlog item 9.19) show up:
- * the create/edit form inputs, the read-only value formatter (list tables, the
- * traceability matrix, the detail pages), and the column-visibility picker for those
- * same tables. Kept in one file since all three are thin wrappers around the same
- * `CustomFieldDefinitionView` shape (`settings.listCustomFields`'s output).
+ * Shared across every place tenant-defined fields (backlog item 9.19) show up: the
+ * create/edit form inputs and the read-only value formatter (list tables, the
+ * traceability matrix, the detail pages). Kept in one file since both are thin
+ * wrappers around the same `CustomFieldDefinitionView` shape
+ * (`settings.listCustomFields`'s output). Column visibility for those tables lives
+ * in column-picker.tsx - tenant-defined fields are just more columns, not a separate
+ * picker.
  */
 
 export interface CustomFieldOption {
@@ -214,57 +213,18 @@ export function CustomFieldInputs({
   );
 }
 
-/** A small popover checklist of which custom-field columns to show in a list/matrix
- * table - the "pick the columns they want to see" ask. `selectedIds` is owned by the
- * caller (typically backed by a URL param via useUrlState, so the chosen columns are
- * part of a shareable link, same as sort/filter state elsewhere in this app) - this
- * component only renders the checklist and calls back with the next full list. Renders
- * nothing when there are no defined fields to pick from. */
-export function CustomFieldColumnPicker({
-  fields,
-  selectedIds,
-  onChange,
-}: {
-  fields: CustomFieldDefinitionView[];
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
-}) {
-  if (fields.length === 0) return null;
+/** Read-only counterpart of CustomFieldInputs - same labels, values formatted the way
+ * list tables already format them. */
+export function CustomFieldReadout({ values }: { values: CustomFieldValueView[] }) {
+  if (values.length === 0) return null;
   return (
-    <Popover>
-      <PopoverTrigger className={buttonVariants({ variant: "outline", size: "sm", className: "h-8 gap-1.5" })}>
-        <SlidersHorizontal className="size-3.5" />
-        Columns{selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 p-2">
-        <p className="px-1 pb-1.5 text-xs font-medium text-muted-foreground">Custom field columns</p>
-        <div className="space-y-0.5">
-          {fields.map((f) => {
-            const checked = selectedIds.includes(f.id);
-            return (
-              <label
-                key={f.id}
-                className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-muted"
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() =>
-                    onChange(checked ? selectedIds.filter((id) => id !== f.id) : [...selectedIds, f.id])
-                  }
-                  className="size-3.5"
-                />
-                {f.name}
-              </label>
-            );
-          })}
+    <div className="space-y-3">
+      {values.map((v) => (
+        <div key={v.fieldId}>
+          <p className="text-xs font-medium text-muted-foreground">{v.name}</p>
+          <p className="text-sm text-foreground/90">{formatCustomFieldValue(v)}</p>
         </div>
-        {selectedIds.length > 0 && (
-          <Button variant="ghost" size="sm" className="mt-1 w-full" onClick={() => onChange([])}>
-            Clear
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
+      ))}
+    </div>
   );
 }

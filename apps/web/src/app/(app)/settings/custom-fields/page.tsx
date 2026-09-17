@@ -25,10 +25,11 @@ export default function CustomFieldsSettingsPage() {
         description={
           <>
             Extra fields your team wants on every requirement or test case, beyond the built-in
-            ones. Shown on the create/edit forms in the order set here, and optionally as extra
-            columns on the requirement/test case lists and the traceability matrix — each of
-            those has its own column picker. Values aren&apos;t versioned the way title/
-            description are — editing one doesn&apos;t create a new version or need approval.
+            ones. Shown on the create/edit forms in the order set here, and as columns you can
+            show or hide on the requirement/test case lists and the traceability matrix — each
+            of those has a column picker covering every column, not just these. Values aren&apos;t
+            versioned the way title/description are — editing one doesn&apos;t create a new
+            version or need approval.
           </>
         }
       />

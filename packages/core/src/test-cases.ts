@@ -386,11 +386,8 @@ export interface TestStepEditInput {
  * Full-replace update for a test case: title, custom field values, case-level requirement
  * links, and the step list (edited in place, added, removed, and/or reordered - all in one
  * call, since the UI resubmits the complete desired step list rather than sending granular
- * diffs). Custom field values are folded into this single call - unlike a requirement's
- * (which stay a separate mutation because they're not gated by version/status the way
- * title/description are, see requirements.ts's updateCustomFieldValues), a test case has no
- * versioning concept at all to keep separate from, so there's no reason to make the UI
- * submit them in two calls.
+ * diffs). Custom field values are folded into this single call the same way
+ * `editDraftVersion` accepts them on a requirement - one Save, not a separate mutation.
  *
  * Test cases aren't versioned/locked the way requirements are (no approval workflow - see
  * TECH_STACK.md), so there's no "can this be edited" gate here; it's always editable. The

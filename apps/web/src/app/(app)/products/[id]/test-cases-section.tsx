@@ -1,9 +1,9 @@
 "use client";
 
 import { BulkGenerateDocumentButton } from "@/components/bulk-generate-document-button";
+import { ColumnPicker } from "@/components/column-picker";
 import {
   asCustomFieldDefinitions,
-  CustomFieldColumnPicker,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
 import { Frame } from "@/components/frame";
@@ -11,11 +11,19 @@ import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
+import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+
+const BUILTIN_COLUMNS: ListColumn[] = [
+  { id: "id", label: "ID" },
+  { id: "title", label: "Test case" },
+  { id: "covers", label: "Covers" },
+  { id: "created", label: "Created" },
+];
 
 interface SortableTestCase {
   sequenceNumber: number;
@@ -54,6 +62,13 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
   );
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_case" });
   const customFields = asCustomFieldDefinitions(customFieldsQuery.data ?? []);
+  const columns = useMemo<ListColumn[]>(
+    () => [
+      ...BUILTIN_COLUMNS,
+      ...customFields.map((f) => ({ id: f.id, label: f.name, defaultVisible: false })),
+    ],
+    [customFields],
+  );
 
   // Same URL-driven filter/sort pattern as requirements-section.tsx - see its comment and
   // use-url-state.ts.
@@ -61,10 +76,14 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
   const search = searchParams.get("q") ?? "";
   const sortBy = searchParams.get("sortBy");
   const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
-  const columnIds = useMemo(() => searchParams.get("columns")?.split(",").filter(Boolean) ?? [], [searchParams]);
+  const columnIds = useMemo(
+    () => parseColumnParam(searchParams.get("columns"), columns),
+    [searchParams, columns],
+  );
+  const visible = useMemo(() => new Set(columnIds), [columnIds]);
   const visibleCustomFields = useMemo(
-    () => customFields.filter((f) => columnIds.includes(f.id)),
-    [customFields, columnIds],
+    () => customFields.filter((f) => visible.has(f.id)),
+    [customFields, visible],
   );
 
   function onSort(key: string) {
@@ -144,10 +163,10 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
               Clear filters
             </Button>
           )}
-          <CustomFieldColumnPicker
-            fields={customFields}
+          <ColumnPicker
+            columns={columns}
             selectedIds={columnIds}
-            onChange={(ids) => setParams({ columns: ids.length ? ids.join(",") : undefined })}
+            onChange={(ids) => setParams({ columns: serializeColumnParam(ids, columns) })}
           />
         </div>
       )}
@@ -176,10 +195,18 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                     aria-label="Select all visible test cases"
                   />
                 </TableHead>
-                <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[92px]" />
-                <SortableTableHead label="Test case" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
-                <SortableTableHead label="Covers" sortKey="covers" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[130px]" />
-                <SortableTableHead label="Created" sortKey="created" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[110px]" />
+                {visible.has("id") && (
+                  <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[92px]" />
+                )}
+                {visible.has("title") && (
+                  <SortableTableHead label="Test case" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
+                )}
+                {visible.has("covers") && (
+                  <SortableTableHead label="Covers" sortKey="covers" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[130px]" />
+                )}
+                {visible.has("created") && (
+                  <SortableTableHead label="Created" sortKey="created" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[110px]" />
+                )}
                 {visibleCustomFields.map((f) => (
                   <TableHead key={f.id}>{f.name}</TableHead>
                 ))}
@@ -188,7 +215,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
             <TableBody>
               {visibleTestCases.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5 + visibleCustomFields.length} className="text-center text-muted-foreground">
+                  <TableCell colSpan={Math.max(columnIds.length + 1, 1)} className="text-center text-muted-foreground">
                     No test cases match these filters.
                   </TableCell>
                 </TableRow>
@@ -204,26 +231,34 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                       aria-label={`Select ${tc.title}`}
                     />
                   </TableCell>
-                  <TableCell>
-                    <Link href={`/test-cases/${tc.id}`} className="font-mono text-[13px] font-medium text-foreground">
-                      {formatItemId(tc.levelCode, tc.sequenceNumber)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="max-w-sm whitespace-normal">
-                    <Link href={`/test-cases/${tc.id}`} className="text-foreground hover:underline">
-                      {tc.title}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    {tc.coversCount > 0 ? (
-                      <Link href={`/products/${productId}?artifact=traceability`} className="text-foreground hover:underline">
-                        {tc.coversCount} req{tc.coversCount === 1 ? "" : "s"}
+                  {visible.has("id") && (
+                    <TableCell>
+                      <Link href={`/test-cases/${tc.id}`} className="font-mono text-[13px] font-medium text-foreground">
+                        {formatItemId(tc.levelCode, tc.sequenceNumber)}
                       </Link>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{new Date(tc.createdAt).toLocaleDateString()}</TableCell>
+                    </TableCell>
+                  )}
+                  {visible.has("title") && (
+                    <TableCell className="max-w-sm whitespace-normal">
+                      <Link href={`/test-cases/${tc.id}`} className="text-foreground hover:underline">
+                        {tc.title}
+                      </Link>
+                    </TableCell>
+                  )}
+                  {visible.has("covers") && (
+                    <TableCell>
+                      {tc.coversCount > 0 ? (
+                        <Link href={`/products/${productId}?artifact=traceability`} className="text-foreground hover:underline">
+                          {tc.coversCount} req{tc.coversCount === 1 ? "" : "s"}
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  )}
+                  {visible.has("created") && (
+                    <TableCell className="text-muted-foreground">{new Date(tc.createdAt).toLocaleDateString()}</TableCell>
+                  )}
                   {visibleCustomFields.map((f) => (
                     <TableCell key={f.id} className="text-muted-foreground">
                       {formatCustomFieldValue(

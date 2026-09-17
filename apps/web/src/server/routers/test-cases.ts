@@ -150,7 +150,7 @@ export const testCasesRouter = router({
           for (const [testCaseId, set] of requirementIdsByTestCase) coversCount.set(testCaseId, set.size);
         }
 
-        // For the list table's optional custom-field columns (see the column picker on
+        // For the list table's configurable columns (see the column picker on
         // the product page) - one batched query for every row rather than N+1.
         const customFieldsByTestCase = await getCustomFieldValuesForEntities(tx, tenantId, "test_case", ids);
 

@@ -31,8 +31,7 @@ import { use, useEffect, useRef, useState } from "react";
  * alone would show as "dirty"), a reasonable tradeoff against the complexity of an
  * order-independent comparison for something that in practice never happens on its own.
  * Custom field values are part of this same form/Save now (see updateTestCase.mutate
- * below), so they're part of the same dirty check too - a test case has no versioning
- * concept to keep them separate from, unlike a requirement's. */
+ * below), so they're part of the same dirty check too. */
 function snapshotOf(title: string, requirementIds: string[], steps: StepDraft[], customFieldState: CustomFieldFormState): string {
   return JSON.stringify({
     title,

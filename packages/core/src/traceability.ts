@@ -15,7 +15,7 @@ export interface TraceabilityRow {
   lastExecutionStatus: string | null;
   lastExecutionStartedAt: Date | null;
   lastExecutionEnvironmentName: string | null;
-  /** For the matrix's optional custom-field columns (see the column picker on the
+  /** For the matrix's configurable columns (see the column picker on the
    * traceability tab) - the requirement's own values, and (when this row does have a
    * covering test case) that test case's. Empty, not null, when there's no covering test
    * case - there's simply nothing to show in those columns for this row, same as every

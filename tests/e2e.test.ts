@@ -420,6 +420,46 @@ describe("e2e: requirements lifecycle", () => {
     expect(edit.ok).toBe(false);
   });
 
+  test("editing a draft updates that version in place; editing an approved requirement starts a new version", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { requirementId } = await createRequirement(tenant);
+
+    const firstEdit = await rpc(tenant.cookie, "POST", "requirements.editDraft", {
+      requirementId,
+      title: "Draft title",
+      description: "Draft body",
+    });
+    expect(firstEdit.ok).toBe(true);
+    const afterDraft = await rpc(tenant.cookie, "GET", "requirements.get", { id: requirementId });
+    expect(afterDraft.data.versions).toHaveLength(1);
+    expect(afterDraft.data.versions[0].versionNumber).toBe(1);
+    expect(afterDraft.data.versions[0].title).toBe("Draft title");
+
+    await moveToInReview(tenant, requirementId);
+    const blockedWhileInReview = await rpc(tenant.cookie, "POST", "requirements.editDraft", {
+      requirementId,
+      title: "nope",
+      description: "nope",
+    });
+    expect(blockedWhileInReview.ok).toBe(false);
+
+    await rpc(tenant.cookie, "POST", "requirements.transition", { requirementId, toCategory: "approved" });
+    const fromApproved = await rpc(tenant.cookie, "POST", "requirements.editDraft", {
+      requirementId,
+      title: "Next version",
+      description: "Next body",
+    });
+    expect(fromApproved.ok).toBe(true);
+    const afterApproved = await rpc(tenant.cookie, "GET", "requirements.get", { id: requirementId });
+    expect(afterApproved.data.versions).toHaveLength(2);
+    expect(afterApproved.data.versions[0].versionNumber).toBe(2);
+    expect(afterApproved.data.versions[0].statusCategory).toBe("draft");
+    expect(afterApproved.data.versions[0].title).toBe("Next version");
+    expect(afterApproved.data.versions[1].versionNumber).toBe(1);
+    expect(afterApproved.data.versions[1].statusCategory).toBe("approved");
+    expect(afterApproved.data.versions[1].title).toBe("Draft title");
+  });
+
   test("RLS: one tenant cannot read another tenant's products or requirements", async () => {
     const tenantA = await registerTenant(`E2E Org A ${uniqueSuffix()}`);
     const tenantB = await registerTenant(`E2E Org B ${uniqueSuffix()}`);
@@ -1491,6 +1531,27 @@ describe("e2e: custom fields (backlog item 9.19)", () => {
     });
     const listedRow = list.data.find((r: any) => r.id === requirementId);
     expect(listedRow.customFieldValues.find((v: any) => v.name === "Owner").value).toBe("Alice");
+
+    // A draft Save writes tenant-defined fields in the same call as title/description,
+    // not a second mutation - the values still aren't versioned, but the submit is one.
+    const edited = await rpc(tenant.cookie, "POST", "requirements.editDraft", {
+      requirementId,
+      title: "T2",
+      description: "D2",
+      customFieldValues: [
+        { fieldId: shortText.data.id, value: "Carol" },
+        { fieldId: integer.data.id, value: 8 },
+        { fieldId: boolean.data.id, value: true },
+        { fieldId: date.data.id, value: "2026-02-01" },
+      ],
+    });
+    expect(edited.ok).toBe(true);
+    const afterEdit = await rpc(tenant.cookie, "GET", "requirements.get", { id: requirementId });
+    expect(afterEdit.data.versions).toHaveLength(1);
+    expect(afterEdit.data.versions[0].versionNumber).toBe(1);
+    expect(afterEdit.data.versions[0].title).toBe("T2");
+    expect(afterEdit.data.customFieldValues.find((v: any) => v.name === "Owner").value).toBe("Carol");
+    expect(afterEdit.data.customFieldValues.find((v: any) => v.name === "Story Points").value).toBe("8");
 
     // Update: dropping the (optional) integer field clears it; the required field must
     // still be present.

@@ -198,9 +198,12 @@ export async function createRequirement(
   return { requirement: { ...requirement, currentVersionId: version.id }, version, status: draftStatus };
 }
 
-/** Only allowed while the current version's status category is 'draft' - edits after
- * that go through transitionRequirement's rework path (back to draft) instead of
- * silently mutating an in-review/approved version's content in place. */
+/** Save a requirement's content (title, description, background, and tenant-defined
+ * fields in one call). A draft is updated in place - iterating on unapproved text
+ * shouldn't mint a version history. An approved requirement is the thing a QMS needs
+ * a snapshot of, so the same save inserts a new draft version and leaves the approved
+ * one in history. In-review and baselined stay locked (rework back to draft, or a
+ * new requirement, respectively). */
 export async function editDraftVersion(
   db: TenantTx,
   params: {
@@ -210,6 +213,7 @@ export async function editDraftVersion(
     description: string;
     background?: string | null;
     editedBy: string;
+    customFieldValues?: CustomFieldValueInput[];
   },
 ) {
   const { requirement, currentVersion } = await loadRequirementWithCurrentVersion(
@@ -218,40 +222,67 @@ export async function editDraftVersion(
     params.requirementId,
   );
   const currentStatus = await getStatusById(db, params.tenantId, currentVersion.statusId);
-  if (currentStatus.category !== "draft") {
-    throw new DomainError("can only edit a requirement while its status is in the draft category");
+  const category = currentStatus.category as RequirementStatusCategory;
+  const background = params.background ? sanitizeRichText(params.background) : null;
+
+  if (category !== "draft" && category !== "approved") {
+    throw new DomainError(
+      category === "baselined"
+        ? "this version is baselined and frozen; create a new requirement to continue"
+        : "can only edit a requirement while it is a draft, or start a new version from an approved one",
+    );
   }
 
-  const [newVersion] = await db
-    .insert(schema.requirementVersions)
-    .values({
-      tenantId: params.tenantId,
-      requirementId: requirement.id,
-      versionNumber: currentVersion.versionNumber + 1,
-      title: params.title,
-      description: params.description,
-      background: params.background ? sanitizeRichText(params.background) : null,
-      statusId: currentVersion.statusId,
-      createdBy: params.editedBy,
-    })
-    .returning();
-  if (!newVersion) throw new DomainError("failed to create new version");
-
-  await db
-    .update(schema.requirements)
-    .set({ currentVersionId: newVersion.id })
-    .where(eq(schema.requirements.id, requirement.id));
+  let saved = currentVersion;
+  if (category === "draft") {
+    const [updated] = await db
+      .update(schema.requirementVersions)
+      .set({
+        title: params.title,
+        description: params.description,
+        background,
+      })
+      .where(eq(schema.requirementVersions.id, currentVersion.id))
+      .returning();
+    if (!updated) throw new DomainError("failed to update draft");
+    saved = updated;
+  } else {
+    const draftStatus = await defaultStatusForCategory(db, params.tenantId, "draft");
+    const [newVersion] = await db
+      .insert(schema.requirementVersions)
+      .values({
+        tenantId: params.tenantId,
+        requirementId: requirement.id,
+        versionNumber: currentVersion.versionNumber + 1,
+        title: params.title,
+        description: params.description,
+        background,
+        statusId: draftStatus.id,
+        createdBy: params.editedBy,
+      })
+      .returning();
+    if (!newVersion) throw new DomainError("failed to create new version");
+    await db
+      .update(schema.requirements)
+      .set({ currentVersionId: newVersion.id })
+      .where(eq(schema.requirements.id, requirement.id));
+    saved = newVersion;
+  }
 
   await writeAuditLog(db, {
     tenantId: params.tenantId,
     actorUserId: params.editedBy,
     action: "requirement.version_edited",
     entityType: "requirement_version",
-    entityId: newVersion.id,
-    payload: { versionNumber: newVersion.versionNumber },
+    entityId: saved.id,
+    payload: { versionNumber: saved.versionNumber },
   });
 
-  return newVersion;
+  if (params.customFieldValues) {
+    await setCustomFieldValues(db, params.tenantId, "requirement", requirement.id, params.customFieldValues);
+  }
+
+  return saved;
 }
 
 /**
@@ -265,10 +296,11 @@ export async function editDraftVersion(
  *   only changed a custom field (the common case right after mapping one for the first
  *   time against rows already imported before) reports "updated", not "unchanged", even
  *   though it never touches the version history.
- * - **Draft-only editing** ("skipped") - exactly the same rule manual edits follow
- *   (`editDraftVersion`): a requirement that has moved past Draft isn't silently rewritten
- *   by a re-import just because the source changed. The row is left alone and the caller
- *   is told why, rather than the import failing outright or bypassing the workflow.
+ * - **Draft-only content rewrite** ("skipped") - a requirement that has moved past Draft
+ *   isn't silently rewritten by a re-import just because the source changed. The row is
+ *   left alone and the caller is told why, rather than the import failing outright or
+ *   bypassing the workflow. Manual edits of an approved requirement can start a new
+ *   version; an importer is not that, so it still only updates a live draft in place.
  */
 export async function createOrUpdateRequirementFromImport(
   db: TenantTx,

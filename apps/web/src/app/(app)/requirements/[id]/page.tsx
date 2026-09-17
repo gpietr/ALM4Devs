@@ -7,6 +7,7 @@ import {
   customFieldFormStateFromValues,
   type CustomFieldFormState,
   CustomFieldInputs,
+  CustomFieldReadout,
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
 import { RichTextEditor } from "@/components/rich-text-editor";
@@ -45,9 +46,6 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
       utils.requirements.allowedTransitions.invalidate({ requirementId: id });
     },
   });
-  const updateCustomFieldValues = trpc.requirements.updateCustomFieldValues.useMutation({
-    onSuccess: () => utils.requirements.get.invalidate({ id }),
-  });
   const deleteRequirement = trpc.requirements.delete.useMutation();
 
   const [editing, setEditing] = useState(false);
@@ -57,42 +55,29 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   const [pendingEsign, setPendingEsign] = useState<{ category: string; label: string } | null>(null);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
-  // Independent of `hasAutoOpenedRef`'s title/description/background sync below - custom
-  // field values aren't part of the draft-only edit flow (see updateCustomFieldValues),
-  // so they're seeded into local state as soon as they arrive, always editable, whatever
-  // the current version's status is.
-  const hasSyncedCustomFieldsRef = useRef(false);
 
-  // Open straight into edit mode, not a read-only view first - a read-only landing only
-  // makes sense once the current version is locked out of further edits (anything past
-  // draft: in_review/approved/baselined). Guarded by a ref rather than derived from
-  // `detail.data` directly so this only fires once per page visit: it must not re-trigger
-  // and stomp on in-progress edits every time the query refetches (e.g. after saving).
-  const hasAutoOpenedRef = useRef(false);
+  // Open a draft straight into the edit form (title, description, background, and
+  // tenant-defined fields together). Approved/in-review land read-only; approved can
+  // still be opened into edit, and that save is what creates the next version. Guarded
+  // by a ref so a refetch after save doesn't stomp in-progress edits.
+  const hasInitializedRef = useRef(false);
   useEffect(() => {
-    if (hasAutoOpenedRef.current || !detail.data) return;
+    if (hasInitializedRef.current || !detail.data) return;
     const latest = detail.data.versions[0];
     if (!latest) return;
-    hasAutoOpenedRef.current = true;
-    if (latest.statusCategory === "draft") {
-      setTitle(latest.title);
-      setDescription(latest.description);
-      setBackground(latest.background ?? "");
-      setEditing(true);
-    }
-  }, [detail.data]);
-
-  useEffect(() => {
-    if (hasSyncedCustomFieldsRef.current || !detail.data) return;
-    hasSyncedCustomFieldsRef.current = true;
+    hasInitializedRef.current = true;
+    setTitle(latest.title);
+    setDescription(latest.description);
+    setBackground(latest.background ?? "");
     setCustomFieldState(customFieldFormStateFromValues(detail.data.customFieldValues));
+    if (latest.statusCategory === "draft") setEditing(true);
   }, [detail.data]);
 
   if (detail.isLoading) return <main className="mx-auto max-w-4xl px-5 py-16 text-[13.5px] text-muted-foreground">Loading...</main>;
   if (detail.error) return <main className="mx-auto max-w-4xl px-5 py-16 text-sm text-destructive">{detail.error.message}</main>;
   if (!detail.data) return null;
 
-  const { requirement, versions, children, coveringTestCases } = detail.data;
+  const { requirement, versions, children, coveringTestCases, customFieldValues } = detail.data;
   const current = versions[0];
   if (!current) return null;
 
@@ -100,6 +85,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
     setTitle(current!.title);
     setDescription(current!.description);
     setBackground(current!.background ?? "");
+    setCustomFieldState(customFieldFormStateFromValues(customFieldValues));
     setEditing(true);
   }
 
@@ -211,16 +197,22 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
       </div>
 
       <Card className="mt-6 p-4">
+        {/* One form: title, description, background, and tenant-defined fields. A draft
+            Save updates the current version in place; saving an approved requirement
+            is what inserts the next version. */}
         {editing ? (
           <form
+            className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault();
-              editDraft.mutate(
-                { requirementId: id, title, description, background: background || undefined },
-                { onSuccess: () => setEditing(false) },
-              );
+              editDraft.mutate({
+                requirementId: id,
+                title,
+                description,
+                background: background || undefined,
+                customFieldValues: toCustomFieldValuesInput(customFieldState),
+              });
             }}
-            className="space-y-3"
           >
             <Input required value={title} onChange={(e) => setTitle(e.target.value)} />
             <Textarea required value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
@@ -228,64 +220,52 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
               <span className="text-xs font-medium text-muted-foreground">Background (optional)</span>
               <RichTextEditor value={background} onChange={setBackground} />
             </Label>
-            {editDraft.error && <p className="text-sm text-destructive">{editDraft.error.message}</p>}
-            <div className="flex gap-2">
-              <Button type="submit" disabled={editDraft.isPending}>
-                Save new version
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <>
-            <p className="whitespace-pre-wrap text-sm text-foreground/90">{current.description}</p>
-            {current.background && (
-              <div className="mt-4 border-t pt-4">
-                <p className="text-xs font-medium text-muted-foreground">Background</p>
-                <RichTextView html={current.background} />
-              </div>
-            )}
-            {current.statusCategory === "draft" ? (
-              <Button variant="outline" size="sm" onClick={startEditing} className="mt-4">
-                Edit (new version)
-              </Button>
-            ) : (
-              <p className="mt-4 text-xs text-muted-foreground">
-                This version is {current.statusName.toLowerCase()} and locked for editing - see the available
-                transitions below.
-              </p>
-            )}
-          </>
-        )}
-
-        {/* Custom field values, right alongside the content they describe rather than in
-            a separate section - a small sub-form of their own (border-t, matching the
-            Background sub-section above), not folded into the editDraft form above it:
-            unlike title/description/background, they aren't version-gated (see
-            updateCustomFieldValues) - always editable here, even once this version is
-            locked past Draft, same as they were before this was ever a form at all. */}
-        {customFieldDefs.length > 0 && (
-          <form
-            className="mt-4 space-y-3 border-t pt-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              updateCustomFieldValues.mutate({ requirementId: id, values: toCustomFieldValuesInput(customFieldState) });
-            }}
-          >
             <CustomFieldInputs
               fields={customFieldDefs}
               state={customFieldState}
               onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
             />
-            {updateCustomFieldValues.error && (
-              <p className="text-sm text-destructive">{updateCustomFieldValues.error.message}</p>
-            )}
-            <Button type="submit" size="sm" disabled={updateCustomFieldValues.isPending}>
-              {updateCustomFieldValues.isPending ? "Saving..." : "Save custom fields"}
-            </Button>
+            {editDraft.error && <p className="text-sm text-destructive">{editDraft.error.message}</p>}
+            <div className="flex gap-2">
+              <Button type="submit" disabled={editDraft.isPending}>
+                {editDraft.isPending
+                  ? "Saving..."
+                  : current.statusCategory === "approved"
+                    ? "Save new version"
+                    : "Save"}
+              </Button>
+              {current.statusCategory !== "draft" && (
+                <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </form>
+        ) : (
+          <div className="space-y-3">
+            <p className="whitespace-pre-wrap text-sm text-foreground/90">{current.description}</p>
+            {current.background && (
+              <div className="border-t pt-4">
+                <p className="text-xs font-medium text-muted-foreground">Background</p>
+                <RichTextView html={current.background} />
+              </div>
+            )}
+            <CustomFieldReadout values={customFieldValues} />
+            {current.statusCategory === "approved" ? (
+              <Button variant="outline" size="sm" onClick={startEditing}>
+                Edit (new version)
+              </Button>
+            ) : current.statusCategory === "draft" ? (
+              <Button variant="outline" size="sm" onClick={startEditing}>
+                Edit
+              </Button>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                This version is {current.statusName.toLowerCase()} and locked for editing - see the available
+                transitions below.
+              </p>
+            )}
+          </div>
         )}
       </Card>
 

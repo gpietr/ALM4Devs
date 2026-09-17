@@ -37,11 +37,11 @@ function toBadRequest(err: unknown): never {
   throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "request failed" });
 }
 
-/** Shared by requirements.create/updateCustomFieldValues and testCases.create/
- * updateCustomFieldValues (test-cases.ts) - one entry per custom field the caller wants
- * to set (or clear, by passing an explicit null). See packages/core/src/custom-fields.ts's
- * setCustomFieldValues for the full semantics: every *defined* field is reconciled
- * against this array on every call, so a field simply left out is treated as cleared. */
+/** Shared by requirements.create/editDraft/updateCustomFieldValues and testCases.create/
+ * update - one entry per custom field the caller wants to set (or clear, by passing an
+ * explicit null). See packages/core/src/custom-fields.ts's setCustomFieldValues for the
+ * full semantics: every *defined* field is reconciled against this array on every call,
+ * so a field simply left out is treated as cleared. */
 const customFieldValueSchema = z.object({
   fieldId: z.string().uuid(),
   value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
@@ -191,7 +191,7 @@ export const requirementsRouter = router({
           for (const [requirementId, set] of testCaseIdsByRequirement) coveredByCount.set(requirementId, set.size);
         }
 
-        // For the list table's optional custom-field columns (see the column picker on
+        // For the list table's configurable columns (see the column picker on
         // the product page) - one batched query for every row rather than N+1.
         const customFieldsByRequirement = await getCustomFieldValuesForEntities(tx, tenantId, "requirement", ids);
 
@@ -359,8 +359,10 @@ export const requirementsRouter = router({
       ).catch(toBadRequest);
     }),
 
-  /** Custom field values aren't versioned or status-gated (see custom-fields.ts) - a
-   * separate, always-available mutation from editDraft, rather than folded into it. */
+  /** Custom field values aren't stored on requirement_versions, but the UI saves them
+   * with title/description via editDraft. This mutation remains for callers that need
+   * to set values without touching versioned content (imports already do that
+   * themselves; tests too). */
   updateCustomFieldValues: protectedProcedure
     .input(z.object({ requirementId: z.string().uuid(), values: z.array(customFieldValueSchema) }))
     .mutation(async ({ ctx, input }) => {
@@ -383,6 +385,7 @@ export const requirementsRouter = router({
         title: z.string().trim().min(1).max(300),
         description: z.string().trim().min(1).max(10000),
         background: z.string().trim().max(20000).optional(),
+        customFieldValues: z.array(customFieldValueSchema).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -396,6 +399,7 @@ export const requirementsRouter = router({
           description: input.description,
           background: input.background,
           editedBy: userId,
+          customFieldValues: input.customFieldValues as CustomFieldValueInput[] | undefined,
         }),
       ).catch(toBadRequest);
     }),

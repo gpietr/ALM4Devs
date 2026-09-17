@@ -3,11 +3,11 @@
 import {
   asCustomFieldDefinitions,
   type CustomFieldFormState,
-  CustomFieldColumnPicker,
   CustomFieldInputs,
   formatCustomFieldValue,
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
+import { ColumnPicker } from "@/components/column-picker";
 import { Frame } from "@/components/frame";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
 import { SortableTableHead } from "@/components/sortable-table-head";
@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { formatItemId } from "@/lib/format-item-id";
+import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Plus } from "lucide-react";
@@ -34,6 +35,15 @@ const RichTextEditor = dynamic(
 );
 
 const ANY = "any";
+
+const BUILTIN_COLUMNS: ListColumn[] = [
+  { id: "id", label: "ID" },
+  { id: "title", label: "Requirement" },
+  { id: "version", label: "Ver" },
+  { id: "status", label: "Status" },
+  { id: "traces", label: "Traces to" },
+  { id: "coverage", label: "Coverage" },
+];
 
 interface SortableRequirement {
   sequenceNumber: number;
@@ -88,10 +98,20 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   const statuses = trpc.requirements.listStatuses.useQuery();
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "requirement" });
   const customFields = useMemo(() => asCustomFieldDefinitions(customFieldsQuery.data ?? []), [customFieldsQuery.data]);
-  // Safety Classification is a plain pre-seeded custom field now (see
-  // packages/core/src/custom-fields.ts's seedDefaultCustomFields) - looked up by name,
-  // not assumed to exist, since a tenant can rename or delete it like any other field.
-  const safetyClassField = useMemo(() => customFields.find((f) => f.name === "Safety Classification"), [customFields]);
+  // Tenant-defined fields are ordinary columns in the same picker as ID/title/status -
+  // Safety Classification used to be a dedicated column (see seedDefaultCustomFields), so
+  // it stays visible by default; anything the tenant adds later starts hidden.
+  const columns = useMemo<ListColumn[]>(
+    () => [
+      ...BUILTIN_COLUMNS,
+      ...customFields.map((f) => ({
+        id: f.id,
+        label: f.name,
+        defaultVisible: f.name === "Safety Classification",
+      })),
+    ],
+    [customFields],
+  );
 
   const createRequirement = trpc.requirements.create.useMutation({
     onSuccess: () => utils.requirements.listByProduct.invalidate({ productId, levelId: levelId! }),
@@ -116,13 +136,14 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   const search = searchParams.get("q") ?? "";
   const sortBy = searchParams.get("sortBy");
   const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
-  // Which custom-field columns to show, comma-separated field ids - same URL-state
-  // approach as every other filter/sort here, so a chosen set of columns is a shareable
-  // link too, not per-viewer local state.
-  const columnIds = useMemo(() => searchParams.get("columns")?.split(",").filter(Boolean) ?? [], [searchParams]);
+  const columnIds = useMemo(
+    () => parseColumnParam(searchParams.get("columns"), columns),
+    [searchParams, columns],
+  );
+  const visible = useMemo(() => new Set(columnIds), [columnIds]);
   const visibleCustomFields = useMemo(
-    () => customFields.filter((f) => columnIds.includes(f.id)),
-    [customFields, columnIds],
+    () => customFields.filter((f) => visible.has(f.id)),
+    [customFields, visible],
   );
 
   function onSort(key: string) {
@@ -288,10 +309,10 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
               Clear filters
             </Button>
           )}
-          <CustomFieldColumnPicker
-            fields={customFields}
+          <ColumnPicker
+            columns={columns}
             selectedIds={columnIds}
-            onChange={(ids) => setParams({ columns: ids.length ? ids.join(",") : undefined })}
+            onChange={(ids) => setParams({ columns: serializeColumnParam(ids, columns) })}
           />
         </div>
       )}
@@ -301,13 +322,22 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
           <Table>
             <TableHeader>
               <TableRow>
-                <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[92px]" />
-                <SortableTableHead label="Requirement" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
-                <TableHead className="w-[70px]">Class</TableHead>
-                <SortableTableHead label="Ver" sortKey="version" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[58px]" />
-                <SortableTableHead label="Status" sortKey="status" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[118px]" />
-                <TableHead className="w-[210px]">Traces to</TableHead>
-                <SortableTableHead label="Coverage" sortKey="covered" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[150px]" />
+                {visible.has("id") && (
+                  <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[92px]" />
+                )}
+                {visible.has("title") && (
+                  <SortableTableHead label="Requirement" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
+                )}
+                {visible.has("version") && (
+                  <SortableTableHead label="Ver" sortKey="version" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[58px]" />
+                )}
+                {visible.has("status") && (
+                  <SortableTableHead label="Status" sortKey="status" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[118px]" />
+                )}
+                {visible.has("traces") && <TableHead className="w-[210px]">Traces to</TableHead>}
+                {visible.has("coverage") && (
+                  <SortableTableHead label="Coverage" sortKey="covered" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[150px]" />
+                )}
                 {visibleCustomFields.map((f) => (
                   <TableHead key={f.id}>{f.name}</TableHead>
                 ))}
@@ -316,67 +346,60 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
             <TableBody>
               {visibleRequirements.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7 + visibleCustomFields.length} className="text-center text-muted-foreground">
+                  <TableCell colSpan={Math.max(columnIds.length, 1)} className="text-center text-muted-foreground">
                     No requirements match these filters.
                   </TableCell>
                 </TableRow>
               )}
-              {visibleRequirements.map((r) => {
-                const safetyClass = safetyClassField
-                  ? r.customFieldValues.find((v) => v.fieldId === safetyClassField.id)?.optionLabel
-                  : null;
-                return (
+              {visibleRequirements.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell>
-                      <Link href={`/requirements/${r.id}`} className="font-mono text-[13px] font-medium text-foreground">
-                        {formatItemId(r.levelCode, r.sequenceNumber)}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="max-w-xs whitespace-normal">
-                      <Link href={`/requirements/${r.id}`} className="text-foreground hover:underline">
-                        {r.title}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {safetyClass ? (
-                        <span
-                          className={
-                            safetyClass === "C"
-                              ? "bg-foreground px-1.5 font-mono text-xs font-medium text-background"
-                              : "font-mono text-xs font-medium"
-                          }
-                        >
-                          {safetyClass}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-[12.5px] text-muted-foreground">v{r.versionNumber}</TableCell>
-                    <TableCell>
-                      <StatusPill category={r.statusCategory} name={r.statusName} />
-                    </TableCell>
-                    <TableCell className="max-w-[210px] truncate text-muted-foreground">
-                      {r.parentTitle && r.parentRequirementId ? (
-                        <Link href={`/requirements/${r.parentRequirementId}`} className="hover:text-foreground" title={r.parentTitle}>
-                          {r.parentTitle}
+                    {visible.has("id") && (
+                      <TableCell>
+                        <Link href={`/requirements/${r.id}`} className="font-mono text-[13px] font-medium text-foreground">
+                          {formatItemId(r.levelCode, r.sequenceNumber)}
                         </Link>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {r.coveredByCount > 0 ? (
-                        <Link href={`/products/${productId}?artifact=traceability`} className="text-foreground hover:underline">
-                          {r.coveredByCount} test{r.coveredByCount === 1 ? "" : "s"}
+                      </TableCell>
+                    )}
+                    {visible.has("title") && (
+                      <TableCell className="max-w-xs whitespace-normal">
+                        <Link href={`/requirements/${r.id}`} className="text-foreground hover:underline">
+                          {r.title}
                         </Link>
-                      ) : (
-                        <span className="flex items-center gap-1.5 text-[#2c455d]">
-                          <NoCoverageIcon />
-                          No coverage
-                        </span>
-                      )}
-                    </TableCell>
+                      </TableCell>
+                    )}
+                    {visible.has("version") && (
+                      <TableCell className="font-mono text-[12.5px] text-muted-foreground">v{r.versionNumber}</TableCell>
+                    )}
+                    {visible.has("status") && (
+                      <TableCell>
+                        <StatusPill category={r.statusCategory} name={r.statusName} />
+                      </TableCell>
+                    )}
+                    {visible.has("traces") && (
+                      <TableCell className="max-w-[210px] truncate text-muted-foreground">
+                        {r.parentTitle && r.parentRequirementId ? (
+                          <Link href={`/requirements/${r.parentRequirementId}`} className="hover:text-foreground" title={r.parentTitle}>
+                            {r.parentTitle}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                    )}
+                    {visible.has("coverage") && (
+                      <TableCell>
+                        {r.coveredByCount > 0 ? (
+                          <Link href={`/products/${productId}?artifact=traceability`} className="text-foreground hover:underline">
+                            {r.coveredByCount} test{r.coveredByCount === 1 ? "" : "s"}
+                          </Link>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[#2c455d]">
+                            <NoCoverageIcon />
+                            No coverage
+                          </span>
+                        )}
+                      </TableCell>
+                    )}
                     {visibleCustomFields.map((f) => (
                       <TableCell key={f.id} className="text-muted-foreground">
                         {formatCustomFieldValue(
@@ -385,8 +408,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                       </TableCell>
                     ))}
                   </TableRow>
-                );
-              })}
+              ))}
             </TableBody>
           </Table>
         </Frame>

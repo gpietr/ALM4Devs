@@ -387,8 +387,8 @@ async function validateCustomFieldValue(
  *
  * Must run inside the transaction that owns `entityId` - trusts it without re-checking
  * tenant ownership, since every caller has either just created it in the same
- * transaction (createRequirement/createTestCase) or is a router endpoint that already
- * verified ownership before calling this (see requirements.ts/test-cases.ts's
+ * transaction (createRequirement/createTestCase/editDraftVersion) or is a router
+ * endpoint that already verified ownership before calling this (requirements.ts's
  * updateCustomFieldValues).
  */
 export interface SetCustomFieldValuesResult {
