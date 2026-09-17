@@ -10,8 +10,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { JumpToItem } from "@/components/jump-to-item";
 import { trpc } from "@/lib/trpc-client";
-import { ChevronDown, Search, Settings } from "lucide-react";
+import { ChevronDown, Settings } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { SignOutButton } from "./sign-out-button";
@@ -28,7 +29,19 @@ import { SignOutButton } from "./sign-out-button";
  * The dropdowns (product switcher, avatar menu) are shadcn's DropdownMenu (Base UI
  * underneath) for real keyboard nav/managed focus, not hand-rolled `<details>`.
  */
-export function TopBar({ productSwitcher, row2 }: { productSwitcher?: ReactNode; row2?: ReactNode }) {
+export function TopBar({
+  productSwitcher,
+  row2,
+  productId = null,
+}: {
+  productSwitcher?: ReactNode;
+  row2?: ReactNode;
+  /** Scopes the "Jump to item" search below to one product - only `ProductContextStrip`
+   * has one to give; plain pages (Settings, the product list, home) leave this null and
+   * the search renders as a disabled affordance instead, same as it did before it was
+   * wired up to anything. */
+  productId?: string | null;
+}) {
   return (
     <div className="border-b border-border bg-card">
       <div className="flex items-stretch">
@@ -37,14 +50,7 @@ export function TopBar({ productSwitcher, row2 }: { productSwitcher?: ReactNode;
         </div>
         {productSwitcher}
         <div className="flex-1" />
-        {/* Global search affordance - nothing wired to it yet, so it renders inert
-            rather than pretending a jump-to-item feature exists (see the handoff's own
-            "if nothing exists, render as a disabled affordance" note). */}
-        <div className="flex items-center gap-2 border-l border-border px-3.5 text-muted-foreground opacity-45">
-          <Search className="size-[15px]" strokeWidth={1.5} />
-          <span className="text-[13.5px]">Jump to item</span>
-          <span className="border border-border px-1 font-mono text-[10.5px]">⌘K</span>
-        </div>
+        <JumpToItem productId={productId} />
         <div className="flex items-center gap-2.5 border-l border-border px-3.5">
           <UserCorner />
         </div>
@@ -129,6 +135,7 @@ export function ProductContextStrip({
 
   return (
     <TopBar
+      productId={productId}
       productSwitcher={
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2 border-r border-border px-4 outline-none">

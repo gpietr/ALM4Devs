@@ -24,7 +24,7 @@ import {
 import { schema, withTenant } from "@galm/db";
 import { proposedStepSchema, proposeStepChanges, resolveModel } from "@galm/integrations-llm";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
 
@@ -75,6 +75,29 @@ export const testCasesRouter = router({
     const tenantId = tenantOf(ctx);
     return withTenant(db, tenantId, (tx) => listEnvironments(tx, tenantId));
   }),
+
+  /** Every test case in a product regardless of level - mirrors requirements.ts's
+   * identical procedure. Used by the shell's "Jump to item" search, which needs to
+   * match across the whole product, not just whichever level's list page is showing. */
+  listAllByProduct: protectedProcedure
+    .input(z.object({ productId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, (tx) =>
+        tx
+          .select({
+            id: schema.testCases.id,
+            title: schema.testCases.title,
+            levelName: schema.levels.name,
+            levelCode: schema.levels.code,
+            sequenceNumber: schema.testCases.sequenceNumber,
+          })
+          .from(schema.testCases)
+          .innerJoin(schema.levels, eq(schema.testCases.levelId, schema.levels.id))
+          .where(and(eq(schema.testCases.tenantId, tenantId), eq(schema.testCases.productId, input.productId)))
+          .orderBy(asc(schema.levels.sortOrder), asc(schema.testCases.title)),
+      );
+    }),
 
   listByProduct: protectedProcedure
     .input(z.object({ productId: z.string().uuid(), levelId: z.string().uuid() }))
