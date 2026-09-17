@@ -45,9 +45,13 @@ export function TopBar({
   return (
     <div className="border-b border-border bg-card">
       <div className="flex items-stretch">
-        <div className="flex items-center border-r border-border px-4">
-          <span className="font-heading text-[15px] tracking-[0.14em] text-foreground uppercase">galm</span>
-        </div>
+        <Link
+          href="/"
+          className="flex items-center border-r border-border px-4 font-heading text-[15px] tracking-[0.14em] text-foreground uppercase hover:bg-muted/50"
+          title="Home"
+        >
+          galm
+        </Link>
         {productSwitcher}
         <div className="flex-1" />
         <JumpToItem productId={productId} />

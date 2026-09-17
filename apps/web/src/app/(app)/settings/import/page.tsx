@@ -1,6 +1,6 @@
 "use client";
 
-import { TopBar } from "@/components/context-strip";
+import { SettingsSectionHeader } from "@/components/settings-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,24 +43,23 @@ export default function SpiraImportHubPage() {
   }, [connection.data]);
 
   return (
-    <>
-      <TopBar />
-      <main className="mx-auto max-w-3xl px-4 py-10">
-      <Link href="/settings" className="text-sm text-muted-foreground underline underline-offset-2">
-        ← Settings
-      </Link>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight">Import from Spira</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Save a connection here once, then import requirements and test cases from their own
-        screens below - each is a one-time import - review the preview, then run it. Import
-        all pages through the whole project automatically in one run.
-      </p>
+    <div>
+      <SettingsSectionHeader
+        title="Import from Spira"
+        description={
+          <>
+            Save a connection here once, then import requirements and test cases from their own
+            screens below — each is a one-time import — review the preview, then run it. Import
+            all pages through the whole project automatically in one run.
+          </>
+        }
+      />
 
       {/* --- Connection --- */}
-      <Card className="mt-8 p-4">
-        <h2 className="text-sm font-medium text-foreground">Connection</h2>
+      <Card className="p-4">
+        <h3 className="text-sm font-medium text-foreground">Connection</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Base URL is the full path up to and including <code>RestService.svc</code> - copy
+          Base URL is the full path up to and including <code>RestService.svc</code> — copy
           it from your Spira instance&apos;s own REST API documentation page, since it
           differs between Cloud and self-hosted installs.
         </p>
@@ -129,10 +128,10 @@ export default function SpiraImportHubPage() {
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
         <Link
           href="/settings/import/requirements"
-          className="group flex flex-col justify-between rounded-lg border bg-card p-4 hover:bg-muted"
+          className="group flex flex-col justify-between border border-border bg-card p-4 hover:bg-muted/50"
         >
           <div>
-            <h2 className="text-sm font-medium text-foreground">Import requirements</h2>
+            <h3 className="text-sm font-medium text-foreground">Import requirements</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Map Title, Description, and optional fields; choose the product and level.
             </p>
@@ -143,10 +142,10 @@ export default function SpiraImportHubPage() {
         </Link>
         <Link
           href="/settings/import/test-cases"
-          className="group flex flex-col justify-between rounded-lg border bg-card p-4 hover:bg-muted"
+          className="group flex flex-col justify-between border border-border bg-card p-4 hover:bg-muted/50"
         >
           <div>
-            <h2 className="text-sm font-medium text-foreground">Import test cases</h2>
+            <h3 className="text-sm font-medium text-foreground">Import test cases</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Map Title and optional fields; every step&apos;s Description and Expected
               Result import automatically.
@@ -157,7 +156,6 @@ export default function SpiraImportHubPage() {
           </span>
         </Link>
       </div>
-      </main>
-    </>
+    </div>
   );
 }

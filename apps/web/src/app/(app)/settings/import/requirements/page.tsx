@@ -1,6 +1,5 @@
 "use client";
 
-import { TopBar } from "@/components/context-strip";
 import { asCustomFieldDefinitions } from "@/components/custom-fields";
 import { RichTextView } from "@/components/rich-text-view";
 import {
@@ -56,20 +55,23 @@ export default function SpiraImportRequirementsPage() {
   const mappingReady = mapping.title !== "" && mapping.description !== "";
 
   return (
-    <>
-      <TopBar />
-      <main className="mx-auto max-w-3xl px-4 py-10">
-      <Link href="/settings/import" className="text-sm text-muted-foreground underline underline-offset-2">
+    <div>
+      <Link
+        href="/settings/import"
+        className="text-[12px] text-muted-foreground hover:text-foreground"
+      >
         ← Import
       </Link>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight">Import requirements from Spira</h1>
-      <div className="mt-2">
+      <h2 className="mt-2 font-heading text-[28px] leading-tight tracking-tight">
+        Import requirements from Spira
+      </h2>
+      <div className="mt-1.5">
         <ConnectionStatusNote connection={connection} />
       </div>
 
       {/* --- Target + fields + mapping --- */}
-      <Card className="mt-6 p-4">
-        <h2 className="text-sm font-medium text-foreground">Import into</h2>
+      <Card className="mt-8 p-4">
+        <h3 className="text-sm font-medium text-foreground">Import into</h3>
         <div className="mt-3 flex gap-3">
           <Select value={productId} onValueChange={(v) => setProductId(v ?? "")}>
             <SelectTrigger>
@@ -329,7 +331,6 @@ export default function SpiraImportRequirementsPage() {
           </div>
         )}
       </Card>
-      </main>
-    </>
+    </div>
   );
 }

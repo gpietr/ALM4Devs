@@ -1,6 +1,6 @@
 "use client";
 
-import { TopBar } from "@/components/context-strip";
+import { SettingsSectionHeader } from "@/components/settings-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,7 +8,6 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc-client";
 import { ChevronDown, ChevronUp, Plus } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type Scope = "test_case" | "test_execution" | "requirement_list";
@@ -105,20 +104,19 @@ const SCOPES: Array<{ value: Scope; label: string; description: string }> = [
  */
 export default function DocumentTemplatesSettingsPage() {
   return (
-    <>
-      <TopBar />
-      <main className="mx-auto max-w-3xl px-4 py-10">
-      <Link href="/settings" className="text-sm text-muted-foreground underline underline-offset-2">
-        ← Settings
-      </Link>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight">Document templates</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Your own HTML (with CSS), using Handlebars placeholders, rendered against real
-        data and converted to PDF. Nothing generated is ever stored - it&apos;s downloaded
-        once and gone.
-      </p>
+    <div>
+      <SettingsSectionHeader
+        title="Document templates"
+        description={
+          <>
+            Your own HTML (with CSS), using Handlebars placeholders, rendered against real
+            data and converted to PDF. Nothing generated is ever stored — it&apos;s downloaded
+            once and gone.
+          </>
+        }
+      />
 
-      <div className="mt-4 rounded-md border">
+      <div className="rounded-md border">
         <div className="border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
           Legend
         </div>
@@ -158,13 +156,12 @@ export default function DocumentTemplatesSettingsPage() {
 
       {SCOPES.map((s) => (
         <section key={s.value} className="mt-10">
-          <h2 className="text-base font-semibold tracking-tight">{s.label}</h2>
+          <h3 className="text-base font-semibold tracking-tight">{s.label}</h3>
           <p className="mt-1 text-sm text-muted-foreground">{s.description}</p>
           <ScopeSection scope={s.value} />
         </section>
       ))}
-      </main>
-    </>
+    </div>
   );
 }
 

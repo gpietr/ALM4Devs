@@ -112,14 +112,21 @@ export function TestStepsEditor({
               <TableHead>Description</TableHead>
               <TableHead>Expected result</TableHead>
               <TableHead className="w-40">Links</TableHead>
-              <TableHead className="w-32" />
+              <TableHead className="w-40" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {steps.map((step, i) => {
               const editing = editingKeys.has(step.key);
               return (
-                <TableRow key={step.key} className="align-top">
+                <TableRow
+                  key={step.key}
+                  className={
+                    editing
+                      ? "align-top bg-primary/6 hover:bg-primary/6"
+                      : "align-top"
+                  }
+                >
                   <TableCell className="pt-3 text-center font-mono text-[11.5px] text-muted-foreground">
                     {String(i + 1).padStart(2, "0")}
                   </TableCell>
@@ -131,6 +138,8 @@ export function TestStepsEditor({
                     // internal horizontal scroll, and two narrow ~1/5-page columns
                     // weren't enough for it. Reading mode (below) keeps them side by
                     // side, since plain rendered text doesn't have that problem.
+                    // Editors use bg-background so they sit as solid fields on the
+                    // muted editing-row wash instead of going transparent through it.
                     <TableCell colSpan={2} className="max-w-0 overflow-hidden whitespace-normal py-2 align-top">
                       <div className="min-w-0 space-y-3">
                         <div>
@@ -155,7 +164,7 @@ export function TestStepsEditor({
                             rows={2}
                             value={step.purpose}
                             onChange={(e) => updateStep(i, { purpose: e.target.value })}
-                            className="text-xs"
+                            className="bg-background text-xs"
                           />
                         </div>
                       </div>
@@ -186,8 +195,8 @@ export function TestStepsEditor({
                       onChange={(requirementIds) => updateStep(i, { requirementIds })}
                     />
                   </TableCell>
-                  <TableCell className="py-2">
-                    <div className="flex items-center gap-1">
+                  <TableCell className="py-2 pr-3 pl-1">
+                    <div className="flex items-center justify-end gap-0.5">
                       <Button
                         type="button"
                         variant="ghost"

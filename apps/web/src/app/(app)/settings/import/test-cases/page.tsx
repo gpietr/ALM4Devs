@@ -1,6 +1,5 @@
 "use client";
 
-import { TopBar } from "@/components/context-strip";
 import { asCustomFieldDefinitions } from "@/components/custom-fields";
 import { RichTextView } from "@/components/rich-text-view";
 import {
@@ -54,18 +53,21 @@ export default function SpiraImportTestCasesPage() {
   const testCaseMappingReady = testCaseMapping.title !== "";
 
   return (
-    <>
-      <TopBar />
-      <main className="mx-auto max-w-3xl px-4 py-10">
-      <Link href="/settings/import" className="text-sm text-muted-foreground underline underline-offset-2">
+    <div>
+      <Link
+        href="/settings/import"
+        className="text-[12px] text-muted-foreground hover:text-foreground"
+      >
         ← Import
       </Link>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight">Import test cases from Spira</h1>
-      <div className="mt-2">
+      <h2 className="mt-2 font-heading text-[28px] leading-tight tracking-tight">
+        Import test cases from Spira
+      </h2>
+      <div className="mt-1.5">
         <ConnectionStatusNote connection={connection} />
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        Only Title is a required mapping - every step&apos;s Description and Expected
+        Only Title is a required mapping — every step&apos;s Description and Expected
         Result are always read directly from Spira, and Purpose (optional) can be mapped
         from any Test Step field, standard or custom.
       </p>
@@ -370,7 +372,6 @@ export default function SpiraImportTestCasesPage() {
           </div>
         )}
       </Card>
-      </main>
-    </>
+    </div>
   );
 }

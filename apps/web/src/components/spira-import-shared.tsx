@@ -7,10 +7,11 @@ import { useCallback, useState } from "react";
 
 /**
  * Shared by every /settings/import/* screen (the connection hub plus the requirements and
- * test-cases import screens - see that directory's layout.tsx for why they're separate
- * routes rather than one long page): the field-mapping dropdown, the connection-status
- * note each sub-screen shows instead of re-rendering the whole connection form, and the
- * import-result row helpers common to both the requirement and test-case result lists.
+ * test-cases import screens - see SettingsShell for the parent nav, and the import hub for
+ * why those two jobs are separate routes rather than one long page): the field-mapping
+ * dropdown, the connection-status note each sub-screen shows instead of re-rendering the
+ * whole connection form, and the import-result row helpers common to both the requirement
+ * and test-case result lists.
  */
 
 const NONE = "__none__";

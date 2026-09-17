@@ -1,7 +1,7 @@
 "use client";
 
-import { TopBar } from "@/components/context-strip";
 import { CUSTOM_FIELD_TYPE_OPTIONS, type CustomFieldDefinitionView } from "@/components/custom-fields";
+import { SettingsSectionHeader } from "@/components/settings-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { trpc } from "@/lib/trpc-client";
 import { ChevronDown, ChevronUp, Plus } from "lucide-react";
-import Link from "next/link";
 import { useState } from "react";
 
 /**
@@ -20,28 +19,26 @@ import { useState } from "react";
  */
 export default function CustomFieldsSettingsPage() {
   return (
-    <>
-      <TopBar />
-      <main className="mx-auto max-w-3xl px-4 py-10">
-      <Link href="/settings" className="text-sm text-muted-foreground underline underline-offset-2">
-        ← Settings
-      </Link>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight">Custom fields</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Extra fields your team wants on every requirement or test case, beyond the built-in
-        ones. Shown on the create/edit forms in the order set here, and optionally as extra
-        columns on the requirement/test case lists and the traceability matrix - each of
-        those has its own column picker. Values aren&apos;t versioned the way title/
-        description are - editing one doesn&apos;t create a new version or need approval.
-      </p>
+    <div>
+      <SettingsSectionHeader
+        title="Custom fields"
+        description={
+          <>
+            Extra fields your team wants on every requirement or test case, beyond the built-in
+            ones. Shown on the create/edit forms in the order set here, and optionally as extra
+            columns on the requirement/test case lists and the traceability matrix — each of
+            those has its own column picker. Values aren&apos;t versioned the way title/
+            description are — editing one doesn&apos;t create a new version or need approval.
+          </>
+        }
+      />
 
-      <h2 className="mt-8 text-base font-semibold tracking-tight">Requirement fields</h2>
+      <h3 className="text-base font-semibold tracking-tight">Requirement fields</h3>
       <CustomFieldsSection entityType="requirement" />
 
-      <h2 className="mt-10 text-base font-semibold tracking-tight">Test case fields</h2>
+      <h3 className="mt-10 text-base font-semibold tracking-tight">Test case fields</h3>
       <CustomFieldsSection entityType="test_case" />
-      </main>
-    </>
+    </div>
   );
 }
 

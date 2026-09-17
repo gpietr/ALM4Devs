@@ -1,13 +1,12 @@
 "use client";
 
-import { TopBar } from "@/components/context-strip";
+import { SettingsSectionHeader } from "@/components/settings-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc-client";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type Provider = "anthropic" | "openai" | "openai_compatible";
@@ -42,23 +41,22 @@ export default function AiSettingsPage() {
   }, [connection.data]);
 
   return (
-    <>
-      <TopBar />
-      <main className="mx-auto max-w-2xl px-4 py-10">
-        <Link href="/settings" className="text-sm text-muted-foreground underline underline-offset-2">
-          ← Settings
-        </Link>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight">AI connection</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Used to draft and revise test steps by chatting with it (see the &quot;Draft with
-          AI&quot; button on a test case&apos;s Steps section). Bring your own key - Anthropic
-          and OpenAI call that provider&apos;s own API directly; &quot;OpenAI-compatible&quot;
-          covers a self-hosted endpoint (Ollama, vLLM) or a third-party one (Groq, Together,
-          DeepSeek, etc) via a custom base URL. Nothing here goes through a Vercel account or
-          any hosted gateway.
-        </p>
+    <div>
+      <SettingsSectionHeader
+        title="AI connection"
+        description={
+          <>
+            Used to draft and revise test steps by chatting with it (see the &quot;Draft with
+            AI&quot; button on a test case&apos;s Steps section). Bring your own key — Anthropic
+            and OpenAI call that provider&apos;s own API directly; &quot;OpenAI-compatible&quot;
+            covers a self-hosted endpoint (Ollama, vLLM) or a third-party one (Groq, Together,
+            DeepSeek, etc) via a custom base URL. Nothing here goes through a Vercel account or
+            any hosted gateway.
+          </>
+        }
+      />
 
-        <Card className="mt-8 p-4">
+      <Card className="max-w-2xl p-4">
           <h2 className="text-sm font-medium text-foreground">Connection</h2>
           <form
             className="mt-3 grid grid-cols-2 gap-3"
@@ -129,7 +127,6 @@ export default function AiSettingsPage() {
           {testConnection.isSuccess && <p className="mt-2 text-sm text-emerald-700">Connected.</p>}
           {testConnection.error && <p className="mt-2 text-sm text-destructive">{testConnection.error.message}</p>}
         </Card>
-      </main>
-    </>
+    </div>
   );
 }

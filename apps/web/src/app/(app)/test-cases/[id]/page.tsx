@@ -234,7 +234,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       <div className="flex items-stretch">
         {/* Left column: title, custom fields, links, steps, save bar. */}
         <form
-          className="min-w-0 flex-1 space-y-5 p-5 pb-8"
+          className="min-w-0 flex-1 space-y-5 p-5 pb-24"
           onSubmit={(e) => {
             e.preventDefault();
             save();
@@ -288,17 +288,22 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
 
           {updateTestCase.error && <p className="text-sm text-destructive">{updateTestCase.error.message}</p>}
 
-          {/* Not fixed to the viewport any more - a 1px top rule at the end of the
-              form, per the handoff. */}
-          <div className="flex items-center gap-2.5 border-t border-border pt-3">
-            <Button type="submit" disabled={updateTestCase.isPending || !isDirty}>
-              {updateTestCase.isPending ? "Saving…" : "Save changes"}
-              <span className="ml-1.5 border border-primary-foreground/45 px-1 font-mono text-[10px] font-normal normal-case">⌘S</span>
-            </Button>
-            <Button type="button" variant="outline" onClick={discardChanges} disabled={updateTestCase.isPending || !isDirty}>
-              Discard
-            </Button>
-            {isDirty && <span className="ml-auto text-[13px] text-muted-foreground">Unsaved edits</span>}
+          {/* `fixed`, not just at the end of the form - a test case can run to dozens of
+              steps, so Save/Discard stay reachable without scrolling, from anywhere on the
+              page (not just `sticky`, which would stop tracking past the form itself). z-40,
+              one below the z-50 popups/dropdowns use, so an open one still renders on top.
+              Extra form pb-24 above clears this bar so it doesn't cover the last fields. */}
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card">
+            <div className="flex items-center gap-2.5 px-5 py-3">
+              <Button type="submit" disabled={updateTestCase.isPending || !isDirty}>
+                {updateTestCase.isPending ? "Saving…" : "Save changes"}
+                <span className="ml-1.5 border border-primary-foreground/45 px-1 font-mono text-[10px] font-normal normal-case">⌘S</span>
+              </Button>
+              <Button type="button" variant="outline" onClick={discardChanges} disabled={updateTestCase.isPending || !isDirty}>
+                Discard
+              </Button>
+              {isDirty && <span className="ml-auto text-[13px] text-muted-foreground">Unsaved edits</span>}
+            </div>
           </div>
         </form>
 
@@ -316,7 +321,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       </div>
 
       {executions.length > 0 && (
-        <div className="border-t border-border px-5 py-3">
+        <div className="border-t border-border px-5 py-3 pb-24">
           <BulkSection testCaseId={id} executions={executions} />
         </div>
       )}
