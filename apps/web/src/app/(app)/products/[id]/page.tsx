@@ -4,13 +4,30 @@ import { ProductContextStrip } from "@/components/context-strip";
 import { getLastLevel, saveLastLevel } from "@/lib/last-level";
 import { saveLastLocation } from "@/lib/last-location";
 import { trpc } from "@/lib/trpc-client";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { use, useEffect, useState } from "react";
-import { RequirementsSection } from "./requirements-section";
-import { TestCasesSection } from "./test-cases-section";
-import { TraceabilitySection } from "./traceability-section";
 
 type Artifact = "requirements" | "testCases" | "traceability";
+
+/**
+ * Each artifact section is its own chunk. Previously all three were static imports on this
+ * fully-client page, so TipTap (via RequirementsSection's create form) shipped in page.js
+ * even for Traceability / Test cases - multi-MB of ProseMirror that those tabs never use.
+ * next/dynamic loads a section only when its artifact is active.
+ */
+const RequirementsSection = dynamic(
+  () => import("./requirements-section").then((m) => m.RequirementsSection),
+  { loading: () => <p className="p-6 text-sm text-muted-foreground">Loading…</p> },
+);
+const TestCasesSection = dynamic(
+  () => import("./test-cases-section").then((m) => m.TestCasesSection),
+  { loading: () => <p className="p-6 text-sm text-muted-foreground">Loading…</p> },
+);
+const TraceabilitySection = dynamic(
+  () => import("./traceability-section").then((m) => m.TraceabilitySection),
+  { loading: () => <p className="p-6 text-sm text-muted-foreground">Loading…</p> },
+);
 
 export default function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: productId } = use(params);

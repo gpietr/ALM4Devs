@@ -10,7 +10,6 @@ import {
 } from "@/components/custom-fields";
 import { Frame } from "@/components/frame";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
-import { RichTextEditor } from "@/components/rich-text-editor";
 import { SortableTableHead } from "@/components/sortable-table-head";
 import { StatusPill } from "@/components/status-pill";
 import { Button } from "@/components/ui/button";
@@ -23,8 +22,16 @@ import { formatItemId } from "@/lib/format-item-id";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Plus } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+
+/** TipTap is multi-MB; only needed when the create form is open, so keep it out of the
+ * requirements list chunk until then. */
+const RichTextEditor = dynamic(
+  () => import("@/components/rich-text-editor").then((m) => m.RichTextEditor),
+  { ssr: false, loading: () => <p className="text-sm text-muted-foreground">Loading editor…</p> },
+);
 
 const ANY = "any";
 
