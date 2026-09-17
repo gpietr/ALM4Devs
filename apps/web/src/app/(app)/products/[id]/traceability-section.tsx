@@ -6,6 +6,7 @@ import {
   CustomFieldColumnPicker,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
+import { Frame } from "@/components/frame";
 import { ResultBadge } from "@/components/result-badge";
 import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button } from "@/components/ui/button";
@@ -226,7 +227,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
       )}
 
       {matrix.data?.length ? (
-        <div className="overflow-hidden rounded-md border">
+        <Frame className="bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -290,21 +291,21 @@ export function TraceabilitySection({ productId }: { productId: string }) {
               {visibleRows.map((row, i) => (
                 <TableRow key={`${row.requirementId}-${row.testCaseId ?? "none"}-${i}`}>
                   <TableCell>
-                    <span className="font-mono text-xs font-semibold text-primary" title={row.levelName}>
+                    <span className="font-mono text-[13px] font-medium text-foreground" title={row.levelName}>
                       {formatItemId(row.levelCode, row.requirementSequenceNumber)}
                     </span>
                   </TableCell>
                   <TableCell className="max-w-xs whitespace-normal">
                     <Link
                       href={`/requirements/${row.requirementId}`}
-                      className="font-medium text-primary underline-offset-2 hover:underline"
+                      className="text-foreground hover:underline"
                     >
                       {row.requirementTitle}
                     </Link>
                   </TableCell>
                   <TableCell>
                     {row.testCaseId && (
-                      <span className="font-mono text-xs font-semibold text-primary">
+                      <span className="font-mono text-[13px] font-medium text-foreground">
                         {formatItemId(row.testCaseLevelCode!, row.testCaseSequenceNumber!)}
                       </span>
                     )}
@@ -313,7 +314,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
                     {row.testCaseId ? (
                       <Link
                         href={`/test-cases/${row.testCaseId}`}
-                        className="text-primary underline-offset-2 hover:underline"
+                        className="text-foreground hover:underline"
                       >
                         {row.testCaseTitle}
                       </Link>
@@ -362,7 +363,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Frame>
       ) : (
         !matrix.isLoading && <p className="text-sm text-muted-foreground">No requirements in this product yet.</p>
       )}

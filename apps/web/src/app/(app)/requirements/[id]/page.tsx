@@ -88,8 +88,8 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
     setCustomFieldState(customFieldFormStateFromValues(detail.data.customFieldValues));
   }, [detail.data]);
 
-  if (detail.isLoading) return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-muted-foreground">Loading...</main>;
-  if (detail.error) return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-destructive">{detail.error.message}</main>;
+  if (detail.isLoading) return <main className="mx-auto max-w-4xl px-5 py-16 text-[13.5px] text-muted-foreground">Loading...</main>;
+  if (detail.error) return <main className="mx-auto max-w-4xl px-5 py-16 text-sm text-destructive">{detail.error.message}</main>;
   if (!detail.data) return null;
 
   const { requirement, versions, children, coveringTestCases } = detail.data;
@@ -115,28 +115,28 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   return (
     <>
       <ProductContextStrip productId={requirement.productId} artifact="requirements" activeLevelId={requirement.levelId} />
-      <main className="mx-auto max-w-3xl px-4 py-10">
+      <main className="mx-auto max-w-4xl px-5 py-8">
       <Link
         href={`/products/${requirement.productId}?artifact=requirements&level=${requirement.levelId}`}
-        className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        className="text-[13px] text-muted-foreground hover:text-foreground"
       >
         ← Back to {requirement.levelName}
       </Link>
       <div className="mt-4 flex items-start justify-between">
         <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            <span className="font-mono font-semibold text-primary">
+          <p className="font-mono text-[10.5px] tracking-[0.14em] text-muted-foreground uppercase">
+            <span className="font-medium text-foreground">
               {formatItemId(requirement.levelCode, requirement.sequenceNumber)}
             </span>{" "}
             · {requirement.levelName}
           </p>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight">{current.title}</h1>
+          <h1 className="mt-1 font-heading text-[28px] leading-tight tracking-tight">{current.title}</h1>
           {requirement.parentTitle && requirement.parentRequirementId && (
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 text-[13.5px] text-muted-foreground">
               Traces to{" "}
               <Link
                 href={`/requirements/${requirement.parentRequirementId}`}
-                className="text-primary underline underline-offset-2 hover:text-primary/80"
+                className="text-foreground hover:underline"
               >
                 {requirement.parentLevelCode && requirement.parentSequenceNumber
                   ? `${formatItemId(requirement.parentLevelCode, requirement.parentSequenceNumber)}: `

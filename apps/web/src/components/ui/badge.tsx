@@ -4,28 +4,22 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 const badgeVariants = cva(
-  "group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
+  // Square, hairline-first - the soft-pill semantic variants this used to carry
+  // (success/warning/info) are gone: status/result vocabularies now code by *form*
+  // (fill/outline/ink), not a traffic-light palette, and each has enough categories
+  // with different shapes that they style themselves directly rather than through this
+  // component's variant system - see status-pill.tsx, result-badge.tsx, and
+  // ai-tools-panel.tsx's diff action tags.
+  "group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-none border border-transparent px-2 py-0.5 font-mono text-xs font-medium whitespace-nowrap transition-colors has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3!",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
-        secondary:
-          "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
-        destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
-        outline:
-          "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
-        ghost:
-          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary-hover",
+        secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+        destructive: "bg-destructive/10 text-destructive [a]:hover:bg-destructive/20",
+        outline: "border-border text-foreground [a]:hover:bg-muted",
+        ghost: "hover:bg-muted",
         link: "text-primary underline-offset-4 hover:underline",
-        // Soft-pill semantic variants (light bg + saturated text, not solid bg + white
-        // text) - not part of shadcn's default set, added to match this app's existing
-        // status-pill/execution-status look rather than switching to a different style.
-        // One shared place for what used to be three independent hand-coded color maps
-        // (status-pill.tsx, and inline maps in the test-case/execution detail pages).
-        success: "bg-emerald-100 text-emerald-800",
-        warning: "bg-amber-100 text-amber-800",
-        info: "bg-blue-100 text-blue-800",
       },
     },
     defaultVariants: {

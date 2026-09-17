@@ -6,47 +6,67 @@
 
 :root {
   color-scheme: light;
-  /* "Slate & Indigo" - the direction picked from the Galm Visual Style Options review
-   * artifact over the earlier "deep teal" (see TECH_STACK.md). Two things changed
-   * together, not just the hue: the page background is a faint cool slate, not stark
-   * white (that was doing as much of the "generic SaaS" work as the color choice), and
-   * --card stays crisp white so real panels (forms, the Spira connection block) sit
-   * visibly above the page instead of blending into it. */
-  --background: oklch(0.965 0.006 275);
-  --foreground: oklch(0.19 0.02 275);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.19 0.02 275);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.19 0.02 275);
-  --primary: oklch(0.36 0.045 265);
-  --primary-foreground: oklch(0.985 0 0);
-  /* A literal darken-on-hover (color-mix with black), not an opacity fade - an opacity
-   * fade against this light a background reads as the button washing out, not deepening.
-   * Exposed as the `bg-primary-hover` utility via the @theme inline mapping below. */
-  --primary-hover: color-mix(in oklch, oklch(0.36 0.045 265) 88%, black 12%);
-  --secondary: oklch(0.93 0.008 275);
-  --secondary-foreground: oklch(0.19 0.02 275);
-  --muted: oklch(0.93 0.008 275);
-  --muted-foreground: oklch(0.5 0.02 275);
+  /* "Technical/wireframe" - the direction picked from the shell-restructure design
+   * handoff (design_handoff_shell_restructure/README.md), replacing the earlier
+   * "Slate & Indigo" palette. A single steel-blue accent (no secondary hue), a faint
+   * grey page ground with crisp white panels/tables, near-black ink instead of a
+   * tinted foreground, and status/result coded by *form* (fill/outline/ink) rather
+   * than a traffic-light palette so a printed submission packet still reads correctly
+   * in greyscale - see status-pill.tsx/result-badge.tsx. Values are the handoff's own
+   * hex tokens verbatim, not re-derived in oklch, so they stay exactly matchable
+   * against the reference file.
+   */
+  --background: #f2f2f3;
+  --foreground: #1d1f20;
+  --card: #ffffff;
+  --card-foreground: #1d1f20;
+  --popover: #ffffff;
+  --popover-foreground: #1d1f20;
+  --primary: #5980a6;
+  --primary-foreground: #ffffff;
+  /* Hover/active steps from the handoff's "Accent hover / active" row - a literal
+   * darken, not an opacity fade (an opacity fade against this light a background reads
+   * as washing the fill out, not deepening it). Exposed as bg-primary-hover via the
+   * @theme inline mapping below; --primary-active is used directly where :active needs
+   * the deeper step (e.g. accent buttons of raw CSS, not going through the Button
+   * component's own :active state).
+   */
+  --primary-hover: #597ea3;
+  --primary-active: #416180;
+  /* Accent tint ("approved" fill) - a light wash of the accent with its own readable-
+   * on-it text color, used by status-pill.tsx's Approved tag. */
+  --accent-tint: #d6ebff;
+  --accent-tint-foreground: #2c455d;
+  /* Accent deep ("baselined" fill, dark field) - the one place ink is inverted: white
+   * text reversed on a near-black-blue panel, used by status-pill.tsx's Baselined tag. */
+  --accent-deep: #1d2d3d;
+  --secondary: #e9e9ea;
+  --secondary-foreground: #1d1f20;
+  --muted: #e9e9ea;
+  --muted-foreground: rgba(29, 31, 32, 0.58);
   /* Shadcn's own "interactive highlight" token (dropdown/select item hover) - tinted
    * toward --primary instead of plain neutral, so menus/selects and the button hovers
-   * below read as one family instead of the accent living only on the primary button. */
-  --accent: color-mix(in oklch, oklch(0.36 0.045 265) 10%, white);
-  --accent-foreground: oklch(0.36 0.045 265);
+   * below read as one family instead of the accent only living on the primary button. */
+  --accent: rgba(89, 128, 166, 0.1);
+  --accent-foreground: #5980a6;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.89 0.01 275);
-  --input: oklch(0.82 0.014 275);
-  --ring: color-mix(in oklch, oklch(0.36 0.045 265) 55%, transparent);
+  /* "Divider" in the handoff's own naming - hairline borders throughout. Table row
+   * rules use a lighter step of the same tint directly (rgba(29,31,32,.09)) rather than
+   * a second named token, matching how the handoff itself expresses it inline. */
+  --border: rgba(29, 31, 32, 0.16);
+  --input: rgba(29, 31, 32, 0.16);
+  --ring: #5980a6;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  /* Tightened from shadcn's default 0.625rem (~14px card corners) - "one shape language,
-   * tighter" from the same review artifact. This one variable drives the whole
-   * --radius-sm/md/lg/xl scale below, so every rounded-* utility across every component
-   * moved together without touching each component file. */
-  --radius: 0.375rem;
+  /* Square corners everywhere - the whole --radius-sm/md/lg/xl/... scale below is
+   * derived from this one variable, so every rounded-* utility across every component
+   * moves to 0 at once without touching each component file (see the handoff's "Border
+   * radius: 0" note - even the user-corner avatar is now a square block, not a circle;
+   * there's no remaining inherently-round shape left in this pass to exempt). */
+  --radius: 0px;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -137,9 +157,13 @@ body {
 }
 
 @theme inline {
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-heading);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+  --color-primary-active: var(--primary-active);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-tint-foreground: var(--accent-tint-foreground);
+  --color-accent-deep: var(--accent-deep);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -224,5 +248,14 @@ body {
   }
   html {
     @apply font-sans;
+  }
+  /* A real `outline`, not Tailwind's default ring/box-shadow treatment - the
+   * shell-restructure handoff calls for exactly this, everywhere, with no other
+   * focus-visible styling competing with it. Components this pass touches (button,
+   * input, select, table's SortableTableHead, the shell's own controls) drop their
+   * inherited focus-visible:ring-* classes so this is the only thing that shows. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }

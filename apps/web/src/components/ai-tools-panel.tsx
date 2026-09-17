@@ -1,11 +1,9 @@
 "use client";
 
 import { RichTextView } from "@/components/rich-text-view";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { RequirementOption } from "@/components/requirement-picker";
-import { getAiPanelPrefs, saveAiPanelPrefs } from "@/lib/ai-panel-prefs";
 import { formatItemId } from "@/lib/format-item-id";
 import { diffHtmlFieldsAsText, diffPlainText, type TextDiffSegment } from "@/lib/text-diff";
 import {
@@ -21,175 +19,63 @@ import {
 import type { StepDraft } from "@/components/test-steps-editor";
 import { cn } from "cn";
 import { trpc } from "@/lib/trpc-client";
-import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-
-const MIN_WIDTH = 320;
-const MAX_WIDTH = 800;
-const DEFAULT_WIDTH = 420;
-
-function clampWidth(width: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width));
-}
+import { useState } from "react";
 
 const ACTION_LABEL: Record<StepDiffAction, string> = {
-  added: "added",
-  modified: "modified",
-  removed: "removed",
-  unchanged: "unchanged",
+  added: "ADDED",
+  modified: "MODIFIED",
+  removed: "REMOVED",
+  unchanged: "UNCHANGED",
 };
-const ACTION_VARIANT: Record<StepDiffAction, "success" | "info" | "destructive" | "secondary"> = {
-  added: "success",
-  modified: "info",
-  removed: "destructive",
-  unchanged: "secondary",
+/** Coded by form (fill/outline/dashed), same convention as status-pill.tsx/
+ * result-badge.tsx: modified = accent outline, added = ink fill, removed = dashed
+ * hairline (an exception state, same visual family as ResultBadge's "blocked"),
+ * unchanged never actually renders (see DiffRowView - a row is only ever shown for a
+ * real change), kept here only so the map is total. */
+const ACTION_CLASS: Record<StepDiffAction, string> = {
+  modified: "border border-primary text-accent-tint-foreground",
+  added: "bg-foreground text-background",
+  removed: "border border-dashed border-foreground/45 text-muted-foreground",
+  unchanged: "border border-border text-muted-foreground",
 };
-
-/**
- * A collapsible panel fixed to the right edge of the viewport - floats on top of the
- * page rather than living in its layout flow, so the page never has to resize to make
- * room for it; the user drags it wider instead. "AI tools" (plural) since it's meant as
- * a home for more than just step drafting if more shows up here later.
- *
- * Renders nothing while loading or when no AI connection is configured - same "quietly
- * absent until configured" convention as GenerateDocumentButton. Whether it was left
- * open, and how wide, persists per-device via localStorage (ai-panel-prefs.ts).
- * Collapsing never loses an in-progress conversation - see the `hidden` toggle below.
- */
-export function AiToolsPanel({
-  productId,
-  testCaseTitle,
-  steps,
-  onAccept,
-  requirementOptions,
-}: {
-  productId: string;
-  testCaseTitle?: string;
-  steps: StepDraft[];
-  onAccept: (steps: StepDraft[]) => void;
-  requirementOptions: RequirementOption[];
-}) {
-  const connection = trpc.llm.getConnection.useQuery();
-  const [expanded, setExpanded] = useState(false);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
-  // Prefs are read from localStorage - not available during server rendering - so this
-  // starts false and the real values apply a moment after mount, same as any other
-  // client-only-storage read in this app (see last-location.ts's callers). Also guards
-  // against writing prefs back out before they've even been read once.
-  const [hydrated, setHydrated] = useState(false);
-  const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  useEffect(() => {
-    const prefs = getAiPanelPrefs();
-    if (prefs) {
-      setExpanded(prefs.open);
-      setWidth(clampWidth(prefs.width));
-    }
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    saveAiPanelPrefs({ open: expanded, width });
-  }, [expanded, width, hydrated]);
-
-  useEffect(() => {
-    function onPointerMove(e: PointerEvent) {
-      const drag = dragStateRef.current;
-      if (!drag) return;
-      // Dragging left (toward the page) makes the right-anchored panel wider, so width
-      // grows as clientX shrinks relative to where the drag started.
-      setWidth(clampWidth(drag.startWidth + (drag.startX - e.clientX)));
-    }
-    function onPointerUp() {
-      dragStateRef.current = null;
-    }
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    };
-  }, []);
-
-  if (connection.isLoading || !connection.data) return null;
-
-  // Both branches stay mounted, toggled with `hidden` - not a conditional return picking
-  // one or the other, which would unmount AiStepAssistBody (and its in-progress chat)
-  // every time the panel collapses.
-  return (
-    <>
-      <button
-        type="button"
-        hidden={expanded}
-        onClick={() => setExpanded(true)}
-        className="fixed top-1/2 right-0 z-[41] flex -translate-y-1/2 items-center gap-1.5 rounded-l-md border border-r-0 bg-card px-2.5 py-3 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
-      >
-        <ChevronLeft className="size-4" />
-        AI tools
-      </button>
-      <aside
-        hidden={!expanded}
-        style={{ width }}
-        // z-[41]: one above the fixed Save/Discard bar (z-40, test-cases/[id]/page.tsx),
-        // one below the z-50 dialogs/dropdowns use everywhere else.
-        className="fixed inset-y-0 right-0 z-[41] flex max-w-[90vw] flex-col border-l bg-card shadow-lg"
-      >
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize AI tools panel"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            dragStateRef.current = { startX: e.clientX, startWidth: width };
-          }}
-          className="absolute inset-y-0 -left-1.5 flex w-3 cursor-col-resize touch-none items-center justify-center"
-        >
-          <GripVertical className="size-3 text-muted-foreground/50" />
-        </div>
-        <div className="flex items-center justify-between border-b px-3 py-2.5">
-          <span className="text-sm font-medium text-foreground">AI tools</span>
-          <button
-            type="button"
-            onClick={() => setExpanded(false)}
-            aria-label="Collapse AI tools panel"
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          <AiStepAssistBody
-            productId={productId}
-            testCaseTitle={testCaseTitle}
-            steps={steps}
-            requirementOptions={requirementOptions}
-            onAccept={onAccept}
-          />
-        </div>
-      </aside>
-    </>
-  );
-}
+/** The same left-bar colors as ACTION_CLASS's border/fill, restated as a plain color for
+ * the 3px bar - can't be derived from the class strings above without parsing them. */
+const ACTION_BAR_CLASS: Record<StepDiffAction, string> = {
+  modified: "border-l-primary",
+  added: "border-l-foreground",
+  removed: "border-l-foreground/30",
+  unchanged: "border-l-border",
+};
 
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
 }
 
-function AiStepAssistBody({
+/**
+ * The AI tools rail tab's content - AI-assisted test step drafting, chat: instruction ->
+ * proposal -> refine/accept. Lives inside `ContextRail`'s "AI" tab (see
+ * design_handoff_shell_restructure/README.md's "2e") rather than a floating overlay of
+ * its own the way this used to render; the rail owns which tab is showing, this only
+ * renders its content. Renders nothing when no AI connection is configured - same
+ * "quietly absent until configured" convention as GenerateDocumentButton.
+ */
+export function AiStepAssistBody({
   productId,
   testCaseTitle,
+  testCaseDisplayId,
   steps,
   requirementOptions,
   onAccept,
 }: {
   productId: string;
   testCaseTitle?: string;
+  testCaseDisplayId?: string;
   steps: StepDraft[];
   requirementOptions: RequirementOption[];
   onAccept: (steps: StepDraft[]) => void;
 }) {
+  const connection = trpc.llm.getConnection.useQuery();
   // Fixed for the length of a conversation - every refinement re-diffs against this
   // same baseline, so the badges always answer "what would change relative to what's
   // really in the editor right now," not "since the last message."
@@ -209,7 +95,7 @@ function AiStepAssistBody({
     if (!instruction || suggest.isPending) return;
     // A fresh conversation (no proposal pending yet) starts from whatever's in the
     // editor right now - re-pin the baseline here rather than only at mount, since the
-    // panel (and this state) stays mounted across edits made before the first message.
+    // rail (and this state) stays mounted across edits made before the first message.
     const activeBaseline = pendingProposal ? baseline : steps;
     if (!pendingProposal) setBaseline(activeBaseline);
     setError(null);
@@ -279,10 +165,16 @@ function AiStepAssistBody({
     setError(null);
   }
 
-  const diffRows = pendingProposal ? diffProposedSteps(baseline, pendingProposal) : [];
+  if (connection.isLoading || !connection.data) return null;
+
+  const diffRows = pendingProposal ? diffProposedSteps(baseline, pendingProposal).filter((r) => r.action !== "unchanged") : [];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
+      <p className="font-mono text-[10.5px] tracking-[0.12em] text-muted-foreground uppercase">
+        Context · {testCaseDisplayId ?? "—"} · {steps.length} step{steps.length === 1 ? "" : "s"}
+      </p>
+
       {truncatedNote && (
         <p className="text-xs text-muted-foreground">
           This product has more requirements than could be given to the assistant - only the first few
@@ -291,56 +183,63 @@ function AiStepAssistBody({
       )}
 
       {messages.length > 0 && (
-        <div className="max-h-32 space-y-1.5 overflow-y-auto rounded-md border p-2 text-sm">
+        <div className="max-h-[132px] space-y-1.5 overflow-y-auto border border-border bg-card p-2.5 text-[13.5px]">
           {messages.map((m, i) => (
-            <p key={i} className={m.role === "user" ? "font-medium text-foreground" : "text-muted-foreground"}>
-              {m.role === "user" ? "You: " : "AI: "}
+            <p key={i} className={m.role === "user" ? "text-foreground" : "text-muted-foreground"}>
+              <span className="font-mono text-[11px] font-medium text-muted-foreground">{m.role === "user" ? "YOU" : "AI"}</span>{" "}
               {m.content}
             </p>
           ))}
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        <Textarea
-          value={instructionText}
-          onChange={(e) => setInstructionText(e.target.value)}
-          placeholder={
-            pendingProposal
-              ? "Refine - e.g. 'also cover REQ-42' or 'merge steps 2 and 3'"
-              : "Tell it what to do - e.g. 'draft steps covering the new alarm-silence requirement'"
+      <Textarea
+        value={instructionText}
+        onChange={(e) => setInstructionText(e.target.value)}
+        placeholder={
+          pendingProposal
+            ? 'Refine — "also cover SYS-7", "merge 02 and 03"…'
+            : "Tell it what to do — e.g. \"draft steps covering the new alarm-silence requirement\""
+        }
+        rows={2}
+        className="min-h-[54px] rounded-none border-border bg-card text-[13.5px]"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submit();
           }
-          rows={2}
-          className="text-sm"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <Button type="button" size="sm" onClick={submit} disabled={suggest.isPending || !instructionText.trim()} className="self-end">
-          {suggest.isPending ? "Thinking..." : pendingProposal ? "Refine" : "Draft"}
+        }}
+      />
+      <div className="flex items-center justify-between">
+        <span className="text-[12.5px] text-muted-foreground">Diffed against the editor, not the last message</span>
+        <Button type="button" size="sm" onClick={submit} disabled={suggest.isPending || !instructionText.trim()}>
+          {suggest.isPending ? "Thinking…" : pendingProposal ? "Refine" : "Draft"}
         </Button>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       {pendingProposal && (
-        <div className="space-y-2">
-          <div className="divide-y rounded-md border">
+        <div className="space-y-2.5 pt-2">
+          <p className="font-mono text-[10.5px] tracking-[0.12em] text-muted-foreground uppercase">
+            Proposed · {diffRows.length} change{diffRows.length === 1 ? "" : "s"}
+          </p>
+          <div className="divide-y divide-border border border-border bg-card">
             {diffRows.map((row, i) => (
               <DiffRowView key={i} row={row} requirementById={requirementById} />
             ))}
           </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={discard}>
+          <div className="flex gap-2">
+            <Button type="button" onClick={acceptAndReset} className="flex-1">
+              Accept {diffRows.length}
+            </Button>
+            <Button type="button" variant="outline" onClick={discard}>
               Discard
             </Button>
-            <Button type="button" size="sm" onClick={acceptAndReset}>
-              Accept
-            </Button>
           </div>
+          <p className="text-[12.5px] text-muted-foreground">
+            Accepting writes into the step editor — still unsaved until <span className="font-mono">⌘S</span>.
+          </p>
         </div>
       )}
     </div>
@@ -371,10 +270,12 @@ function DiffRowView({
   const purposeChanged = row.action === "modified" && (row.baseline?.purpose ?? "") !== (row.proposed?.purpose ?? "");
 
   return (
-    <div className="space-y-1.5 p-2">
+    <div className={cn("space-y-1.5 border-l-[3px] p-2.5", ACTION_BAR_CLASS[row.action])}>
       <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{stepNumberLabel(row)}</span>
-        <Badge variant={ACTION_VARIANT[row.action]}>{ACTION_LABEL[row.action]}</Badge>
+        <span className="font-mono text-[11.5px] font-medium text-muted-foreground">{stepNumberLabel(row)}</span>
+        <span className={cn("px-1.5 font-mono text-[11px] font-medium", ACTION_CLASS[row.action])}>
+          {ACTION_LABEL[row.action]}
+        </span>
       </div>
 
       {row.action === "modified" && row.baseline && row.proposed ? (
@@ -387,17 +288,21 @@ function DiffRowView({
 
       {row.action === "modified" && row.baseline && row.proposed
         ? purposeChanged && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[12.5px] text-muted-foreground">
               Purpose: <InlineTextDiff segments={diffPlainText(row.baseline.purpose ?? "", row.proposed.purpose ?? "")} />
             </p>
           )
-        : step.purpose && <p className="text-xs text-muted-foreground">Purpose: {step.purpose}</p>}
+        : step.purpose && <p className="text-[12.5px] text-muted-foreground">Purpose: {step.purpose}</p>}
       {requirementIds.length > 0 && (
-        <p className="flex flex-wrap gap-1 text-xs">
+        <p className="flex flex-wrap gap-1">
           {requirementIds.map((id) => {
             const option = requirementById.get(id);
             return (
-              <span key={id} className="rounded bg-muted px-1.5 py-0.5" title={option?.title ?? id}>
+              <span
+                key={id}
+                className="border border-border px-1.5 font-mono text-[11.5px]"
+                title={option?.title ?? id}
+              >
                 {option ? formatItemId(option.levelCode, option.sequenceNumber) : id}
               </span>
             );
@@ -413,10 +318,10 @@ function DiffRowView({
 function ModifiedStepDiff({ before, after }: { before: StepDraft; after: ProposedStep }) {
   return (
     <div className="space-y-0.5">
-      <div className="text-sm">
+      <div className="text-[13.5px]">
         <InlineTextDiff segments={diffHtmlFieldsAsText(before.description, after.description)} />
       </div>
-      <div className="text-xs text-muted-foreground">
+      <div className="text-[12.5px] text-muted-foreground">
         Expected: <InlineTextDiff segments={diffHtmlFieldsAsText(before.expectedResult, after.expectedResult)} />
       </div>
     </div>
@@ -430,11 +335,11 @@ function InlineTextDiff({ segments }: { segments: TextDiffSegment[] }) {
     <>
       {segments.map((seg, i) =>
         seg.type === "added" ? (
-          <ins key={i} className="rounded-sm bg-emerald-100 px-0.5 text-emerald-800 no-underline">
+          <ins key={i} className="bg-[rgba(89,128,166,.24)] px-0.5 no-underline">
             {seg.text}
           </ins>
         ) : seg.type === "removed" ? (
-          <del key={i} className="rounded-sm bg-red-100 px-0.5 text-red-800">
+          <del key={i} className="bg-[rgba(29,31,32,.12)] px-0.5">
             {seg.text}
           </del>
         ) : (
@@ -458,10 +363,10 @@ function StepSide({
 }) {
   return (
     <div className="space-y-0.5">
-      <div className={cn("text-sm", struck && "text-muted-foreground line-through decoration-muted-foreground/50")}>
+      <div className={cn("text-[13.5px]", struck && "text-muted-foreground line-through decoration-muted-foreground/50")}>
         <RichTextView html={description} />
       </div>
-      <div className={cn("text-xs text-muted-foreground", struck && "line-through decoration-muted-foreground/50")}>
+      <div className={cn("text-[12.5px] text-muted-foreground", struck && "line-through decoration-muted-foreground/50")}>
         Expected: <RichTextView html={expectedResult} />
       </div>
     </div>

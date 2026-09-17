@@ -6,18 +6,16 @@ import {
   CustomFieldColumnPicker,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
+import { Frame } from "@/components/frame";
 import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-
-const ANY = "any";
 
 interface SortableTestCase {
   sequenceNumber: number;
@@ -45,6 +43,10 @@ function compareTestCases(a: SortableTestCase, b: SortableTestCase, sortBy: stri
 // identical note) - this just renders the create link + list for the given level.
 export function TestCasesSection({ productId, levelId }: { productId: string; levelId: string | null }) {
   const levels = trpc.testCases.listLevels.useQuery();
+  // Same query the context strip's product switcher already makes - TanStack Query
+  // dedupes it by key, so this doesn't add a second network request.
+  const products = trpc.products.list.useQuery();
+  const productName = products.data?.find((p) => p.id === productId)?.name ?? "Product";
 
   const testCases = trpc.testCases.listByProduct.useQuery(
     { productId, levelId: levelId! },
@@ -105,27 +107,38 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
     });
   }
 
-  if (levels.isLoading || !levelId) return <p className="text-sm text-muted-foreground">Loading...</p>;
+  if (levels.isLoading || !levelId) return <p className="p-6 text-[13.5px] text-muted-foreground">Loading...</p>;
+
+  const levelName = levels.data?.find((l) => l.id === levelId)?.name ?? "Test Cases";
 
   return (
-    <>
-      <div className="mb-6">
-        <Link href={`/products/${productId}/test-cases/new?levelId=${levelId}`} className={buttonVariants()}>
+    <div className="p-6">
+      <div className="flex items-end justify-between gap-6">
+        <div>
+          <p className="font-mono text-[10.5px] tracking-[0.14em] text-muted-foreground uppercase">
+            {productName} / {levelName}
+          </p>
+          <h2 className="mt-0.5 font-heading text-[34px] leading-[1.05] tracking-tight">{levelName}</h2>
+        </div>
+        <Link href={`/products/${productId}/test-cases/new?levelId=${levelId}`} className={buttonVariants({ className: "gap-1.5" })}>
+          <Plus className="size-3.5" />
           New test case
         </Link>
       </div>
 
-      {testCases.isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
-      {testCases.error && <p className="text-sm text-destructive">{testCases.error.message}</p>}
+      {testCases.isLoading && <p className="mt-4 text-[13.5px] text-muted-foreground">Loading...</p>}
+      {testCases.error && <p className="mt-4 text-sm text-destructive">{testCases.error.message}</p>}
 
       {!!testCases.data?.length && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Input
-            value={search}
-            onChange={(e) => setParams({ q: e.target.value || undefined })}
-            placeholder="Search title..."
-            className="h-8 w-48"
-          />
+        <div className="mt-4.5 flex flex-wrap items-center gap-2">
+          <div className="flex w-[250px] items-center gap-1.5 border border-border bg-card px-2.5 py-[5px]">
+            <input
+              value={search}
+              onChange={(e) => setParams({ q: e.target.value || undefined })}
+              placeholder="Search title or id…"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
           {search && (
             <Button type="button" variant="ghost" size="sm" onClick={() => setParams({ q: undefined })}>
               Clear filters
@@ -140,7 +153,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
       )}
 
       {selectedIds.size > 0 && (
-        <div className="mb-3">
+        <div className="mt-3">
           <BulkGenerateDocumentButton
             scope="test_case"
             ids={[...selectedIds]}
@@ -150,7 +163,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
       )}
 
       {testCases.data?.length ? (
-        <div className="overflow-hidden rounded-md border">
+        <Frame className="mt-3.5 bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -163,22 +176,10 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                     aria-label="Select all visible test cases"
                   />
                 </TableHead>
-                <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
-                <SortableTableHead label="Title" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
-                <SortableTableHead
-                  label="Covers"
-                  sortKey="covers"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                />
-                <SortableTableHead
-                  label="Created"
-                  sortKey="created"
-                  activeSortKey={sortBy}
-                  direction={sortDir}
-                  onSort={onSort}
-                />
+                <SortableTableHead label="ID" sortKey="id" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[92px]" />
+                <SortableTableHead label="Test case" sortKey="title" activeSortKey={sortBy} direction={sortDir} onSort={onSort} />
+                <SortableTableHead label="Covers" sortKey="covers" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[130px]" />
+                <SortableTableHead label="Created" sortKey="created" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[110px]" />
                 {visibleCustomFields.map((f) => (
                   <TableHead key={f.id}>{f.name}</TableHead>
                 ))}
@@ -204,41 +205,29 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                     />
                   </TableCell>
                   <TableCell>
-                    <span className="font-mono text-xs font-semibold text-primary" title={tc.id}>
+                    <Link href={`/test-cases/${tc.id}`} className="font-mono text-[13px] font-medium text-foreground">
                       {formatItemId(tc.levelCode, tc.sequenceNumber)}
-                    </span>
+                    </Link>
                   </TableCell>
                   <TableCell className="max-w-sm whitespace-normal">
-                    <Link
-                      href={`/test-cases/${tc.id}`}
-                      className="font-medium text-primary underline-offset-2 hover:underline"
-                    >
+                    <Link href={`/test-cases/${tc.id}`} className="text-foreground hover:underline">
                       {tc.title}
                     </Link>
                   </TableCell>
                   <TableCell>
                     {tc.coversCount > 0 ? (
-                      <Link
-                        href={`/products/${productId}?artifact=traceability`}
-                        className="text-primary underline-offset-2 hover:underline"
-                      >
+                      <Link href={`/products/${productId}?artifact=traceability`} className="text-foreground hover:underline">
                         {tc.coversCount} req{tc.coversCount === 1 ? "" : "s"}
                       </Link>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(tc.createdAt).toLocaleDateString()}
-                  </TableCell>
+                  <TableCell className="text-muted-foreground">{new Date(tc.createdAt).toLocaleDateString()}</TableCell>
                   {visibleCustomFields.map((f) => (
                     <TableCell key={f.id} className="text-muted-foreground">
                       {formatCustomFieldValue(
-                        tc.customFieldValues.find((v) => v.fieldId === f.id) ?? {
-                          fieldType: f.fieldType,
-                          value: null,
-                          optionLabel: null,
-                        },
+                        tc.customFieldValues.find((v) => v.fieldId === f.id) ?? { fieldType: f.fieldType, value: null, optionLabel: null },
                       )}
                     </TableCell>
                   ))}
@@ -246,10 +235,16 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Frame>
       ) : (
-        <p className="text-sm text-muted-foreground">No test cases at this level yet - create one above.</p>
+        <p className="mt-4 text-[13.5px] text-muted-foreground">No test cases at this level yet - create one above.</p>
       )}
-    </>
+
+      {!!testCases.data?.length && (
+        <p className="mt-2.5 text-[12.5px] text-muted-foreground">
+          Showing {visibleTestCases.length} of {testCases.data.length}
+        </p>
+      )}
+    </div>
   );
 }

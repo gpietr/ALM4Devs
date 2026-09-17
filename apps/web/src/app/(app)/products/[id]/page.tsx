@@ -4,7 +4,6 @@ import { ProductContextStrip } from "@/components/context-strip";
 import { getLastLevel, saveLastLevel } from "@/lib/last-level";
 import { saveLastLocation } from "@/lib/last-location";
 import { trpc } from "@/lib/trpc-client";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import { RequirementsSection } from "./requirements-section";
@@ -56,22 +55,21 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <ProductContextStrip productId={productId} artifact={artifact} activeLevelId={activeLevelId} />
-      {/* Wider than the other two tabs' max-w-3xl - the traceability table has five real
-          columns (requirement, level, test case, execution, status) and needs the room. */}
-      <main className={`mx-auto px-4 py-10 ${artifact === "traceability" ? "max-w-6xl" : "max-w-3xl"}`}>
-        <Link href="/products" className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground">
-          ← All products
-        </Link>
-        <div className="mt-4">
-        {artifact === "requirements" ? (
-          <RequirementsSection productId={productId} levelId={activeLevelId} />
-        ) : artifact === "testCases" ? (
-          <TestCasesSection productId={productId} levelId={activeLevelId} />
-        ) : (
+      {/* Full width, not a centered column - list/index screens get the whole viewport
+          (design_handoff_shell_restructure/README.md's "2a"); each section owns its own
+          padding. The "back to all products" link this used to render above every
+          artifact is gone - the shell's own product switcher (row 1) already opens
+          straight to the same "All products" destination, so this was a second control
+          for the one job. */}
+      {artifact === "traceability" ? (
+        <div className="p-6">
           <TraceabilitySection productId={productId} />
-        )}
         </div>
-      </main>
+      ) : artifact === "requirements" ? (
+        <RequirementsSection productId={productId} levelId={activeLevelId} />
+      ) : (
+        <TestCasesSection productId={productId} levelId={activeLevelId} />
+      )}
     </>
   );
 }

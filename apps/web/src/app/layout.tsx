@@ -3,18 +3,25 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { Barlow, Barlow_Condensed, IBM_Plex_Mono } from "next/font/google";
 import { cn } from "@/lib/utils";
 
-// IBM Plex Sans/Mono, not Geist (shadcn's init default) or Inter (the generic "safe"
-// choice) - a deliberate pairing, self-hosted at build time via next/font (no runtime CDN
-// request, which matters more here than for a one-off Artifact mockup since this product
-// ships as a self-host Docker image). Mono is for identifiers - requirement/test-case ids,
-// version numbers - not for UI chrome.
-const ibmPlexSans = IBM_Plex_Sans({
+// Barlow/Barlow Condensed + IBM Plex Mono - the shell-restructure design handoff's
+// "technical/wireframe" pairing (design_handoff_shell_restructure/README.md), replacing
+// the earlier IBM Plex Sans body face. Self-hosted at build time via next/font (no
+// runtime CDN request - this product ships as a self-host Docker image, so a viewer never
+// makes an outbound request to Google Fonts). Condensed carries every heading/label/
+// button (--font-heading); Barlow is body text (--font-sans); mono stays exactly what it
+// was - every identifier (item ids, versions, level codes, status tags), never UI chrome.
+const barlow = Barlow({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600"],
   variable: "--font-sans",
+});
+const barlowCondensed = Barlow_Condensed({
+  subsets: ["latin"],
+  weight: ["600"],
+  variable: "--font-heading",
 });
 const ibmPlexMono = IBM_Plex_Mono({
   subsets: ["latin"],
@@ -28,7 +35,7 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={cn("font-sans", ibmPlexSans.variable, ibmPlexMono.variable)}>
+    <html lang="en" className={cn("font-sans", barlow.variable, barlowCondensed.variable, ibmPlexMono.variable)}>
       <body>
         <Providers>
           <TooltipProvider>

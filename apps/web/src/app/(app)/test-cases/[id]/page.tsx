@@ -11,15 +11,12 @@ import {
 } from "@/components/custom-fields";
 import { BulkGenerateDocumentButton } from "@/components/bulk-generate-document-button";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
-import { AiToolsPanel } from "@/components/ai-tools-panel";
+import { ContextRail } from "@/components/context-rail";
 import { RequirementPicker } from "@/components/requirement-picker";
-import { ResultBadge } from "@/components/result-badge";
 import { emptyStep, type StepDraft, TestStepsEditor } from "@/components/test-steps-editor";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatItemId } from "@/lib/format-item-id";
 import { trpc } from "@/lib/trpc-client";
 import { useUnsavedChangesGuard } from "@/lib/use-unsaved-changes-guard";
@@ -56,7 +53,6 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   const router = useRouter();
   const utils = trpc.useUtils();
   const detail = trpc.testCases.get.useQuery({ id });
-  const environments = trpc.testCases.listEnvironments.useQuery();
   const levels = trpc.testCases.listLevels.useQuery();
   const requirementOptions = trpc.requirements.listAllByProduct.useQuery(
     { productId: detail.data?.testCase.productId ?? "" },
@@ -64,9 +60,6 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   );
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_case" });
   const customFieldDefs = asCustomFieldDefinitions(customFieldsQuery.data ?? []);
-  const startExecution = trpc.testCases.startExecution.useMutation({
-    onSuccess: (result) => router.push(`/test-cases/${id}/executions/${result.execution.id}`),
-  });
   const updateTestCase = trpc.testCases.update.useMutation({
     // Rebuilt from the mutation's own response + the variables just submitted, not a
     // refetch round-trip: `result.steps` comes back in the same order as `variables.steps`
@@ -108,16 +101,11 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   });
   const deleteTestCase = trpc.testCases.delete.useMutation();
 
-  const [environmentId, setEnvironmentId] = useState("");
   const [title, setTitle] = useState("");
   const [requirementIds, setRequirementIds] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepDraft[]>([emptyStep()]);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
-  // Bulk-select a few of this test case's own executions to zip up as separate reports
-  // (backlog item 9.32) - declared here, unconditionally, not below the loading guard,
-  // since hooks can't follow an early return.
-  const [selectedExecutionIds, setSelectedExecutionIds] = useState<Set<string>>(new Set());
 
   // Test cases have no locked/approval state at all (unlike requirements) - so unlike that
   // page, there's no "only auto-open if unlocked" condition here: this form is simply
@@ -166,13 +154,44 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   const isDirty = savedSnapshot !== null && snapshotOf(title, requirementIds, steps, customFieldState) !== savedSnapshot;
   useUnsavedChangesGuard(isDirty, "You have unsaved changes on this test case. Leave without saving?");
 
-  if (detail.isLoading) return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-muted-foreground">Loading...</main>;
+  function save() {
+    updateTestCase.mutate({
+      testCaseId: id,
+      title,
+      requirementIds: requirementIds.length ? requirementIds : undefined,
+      steps: steps.map((s) => ({
+        id: s.id,
+        description: s.description,
+        expectedResult: s.expectedResult,
+        purpose: s.purpose || undefined,
+        requirementIds: s.requirementIds.length ? s.requirementIds : undefined,
+      })),
+      customFieldValues: toCustomFieldValuesInput(customFieldState),
+    });
+  }
+
+  // A real ⌘S handler, not just a label claiming one exists - see context-rail.tsx's
+  // identical note on the step recorder's ⌘↵.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (isDirty && !updateTestCase.isPending) save();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty, updateTestCase.isPending, title, requirementIds, steps, customFieldState]);
+
+  if (detail.isLoading) return <p className="p-10 text-[13.5px] text-muted-foreground">Loading...</p>;
   if (detail.error || !detail.data) {
-    return <main className="mx-auto max-w-3xl px-4 py-16 text-sm text-destructive">{detail.error?.message}</main>;
+    return <p className="p-10 text-sm text-destructive">{detail.error?.message}</p>;
   }
 
   const { testCase, effectiveRequirementLinks, executions } = detail.data;
   const levelName = levels.data?.find((l) => l.id === testCase.levelId)?.name ?? "Test Cases";
+  const displayId = formatItemId(testCase.levelCode, testCase.sequenceNumber);
 
   function discardChanges() {
     syncFromServer(testCase, detail.data!.steps, detail.data!.directRequirementIds, detail.data!.customFieldValues);
@@ -181,177 +200,143 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   return (
     <>
       <ProductContextStrip productId={testCase.productId} artifact="testCases" activeLevelId={testCase.levelId} />
-      {/* Extra bottom padding clears the fixed Save/Discard bar at the end of the form -
-          otherwise it would sit on top of (and hide) whatever's last on the page, e.g. the
-          execution history list once you've scrolled all the way down. */}
-      <main className="mx-auto max-w-4xl px-4 pt-10 pb-24">
-      <div className="flex items-center justify-between">
-        <Link
-          href={`/products/${testCase.productId}?artifact=testCases&level=${testCase.levelId}`}
-          className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
-        >
-          ← Back to {levelName}
-        </Link>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground hover:text-destructive"
-          disabled={deleteTestCase.isPending}
-          onClick={() => {
-            if (
-              !confirm(`Delete ${formatItemId(testCase.levelCode, testCase.sequenceNumber)} "${testCase.title}"? This cannot be undone.`)
-            ) {
-              return;
-            }
-            deleteTestCase.mutate(
-              { id },
-              {
-                onSuccess: () => router.push(`/products/${testCase.productId}?artifact=testCases&level=${testCase.levelId}`),
-              },
-            );
-          }}
-        >
-          {deleteTestCase.isPending ? "Deleting..." : "Delete"}
-        </Button>
-      </div>
-      {deleteTestCase.error && <p className="mt-2 text-sm text-destructive">{deleteTestCase.error.message}</p>}
 
-      <div className="mt-3">
-        <GenerateDocumentButton scope="test_case" buildRequestBody={() => ({ testCaseId: id })} />
-      </div>
-
-      <form
-        className="mt-4 space-y-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          updateTestCase.mutate({
-            testCaseId: id,
-            title,
-            requirementIds: requirementIds.length ? requirementIds : undefined,
-            steps: steps.map((s) => ({
-              id: s.id,
-              description: s.description,
-              expectedResult: s.expectedResult,
-              purpose: s.purpose || undefined,
-              requirementIds: s.requirementIds.length ? s.requirementIds : undefined,
-            })),
-            customFieldValues: toCustomFieldValuesInput(customFieldState),
-          });
-        }}
-      >
-        <p className="font-mono text-xs font-semibold text-primary">{formatItemId(testCase.levelCode, testCase.sequenceNumber)}</p>
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium text-muted-foreground">Title</Label>
-          <Input required value={title} onChange={(e) => setTitle(e.target.value)} className="text-base font-semibold" />
-        </div>
-
-        <CustomFieldInputs
-          fields={customFieldDefs}
-          state={customFieldState}
-          onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
-        />
-
-        {effectiveRequirementLinks.length > 0 && (
-          <p className="text-sm text-muted-foreground">
-            Traces to:{" "}
-            {effectiveRequirementLinks.map((r, i) => (
-              <span key={r.id}>
-                {i > 0 && ", "}
-                <Link href={`/requirements/${r.id}`} className="text-primary underline-offset-2 hover:underline">
-                  {formatItemId(r.levelCode, r.sequenceNumber)}: {r.title}
-                </Link>
-              </span>
-            ))}
-          </p>
-        )}
-
-        <Label className="flex-col items-start gap-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            Linked requirements (applies to the whole test case, independent of any step link)
-          </span>
-          <RequirementPicker
-            options={requirementOptions.data ?? []}
-            value={requirementIds}
-            onChange={setRequirementIds}
-          />
-        </Label>
-
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium text-foreground">Steps</h2>
-          <TestStepsEditor steps={steps} onChange={setSteps} requirementOptions={requirementOptions.data ?? []} />
-        </div>
-
-        {updateTestCase.error && <p className="text-sm text-destructive">{updateTestCase.error.message}</p>}
-
-        {/* `fixed`, not just at the end of the form - a test case can run to dozens of
-            steps, so Save/Discard stay reachable without scrolling, from anywhere on the
-            page (not just `sticky`, which would stop tracking past the form itself). z-40,
-            one below the z-50 popups/dropdowns use, so an open one still renders on top. */}
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background">
-          <div className="mx-auto flex max-w-4xl items-center gap-2 px-4 py-3">
-            <Button type="submit" disabled={updateTestCase.isPending || !isDirty}>
-              {updateTestCase.isPending ? "Saving..." : "Save changes"}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={discardChanges}
-              disabled={updateTestCase.isPending || !isDirty}
-            >
-              Discard changes
-            </Button>
-          </div>
-        </div>
-      </form>
-
-      <Card className="mt-8 flex-row items-end gap-2 p-4">
-        <div className="flex-1 space-y-1.5">
-          <Label>Environment</Label>
-          <Select value={environmentId} onValueChange={(v) => setEnvironmentId(v ?? "")}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select environment" />
-            </SelectTrigger>
-            <SelectContent>
-              {environments.data?.map((env) => (
-                <SelectItem key={env.id} value={env.id}>
-                  {env.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {/* An invisible label matching the field's, not `items-end` alone - makes the
-            button's own column the same height as the field's column (label row + control
-            row) so the two controls' bottoms line up exactly, rather than relying on flex
-            cross-axis alignment to guess it from unequal-height siblings. */}
-        <div className="space-y-1.5">
-          <Label className="invisible">Run</Label>
+      {/* Sub-header: breadcrumb left, document/delete actions right - same grammar as
+          the "2d" reference's own sub-header row. */}
+      <div className="flex items-center justify-between border-b border-border bg-card px-5 py-[9px]">
+        <span className="font-mono text-xs text-muted-foreground">
+          <Link href={`/products/${testCase.productId}?artifact=testCases&level=${testCase.levelId}`} className="hover:text-foreground">
+            {testCase.levelCode}
+          </Link>{" "}
+          <span className="opacity-50">/</span> <span className="font-medium text-foreground">{displayId}</span>
+        </span>
+        <div className="flex items-center gap-2.5">
+          <GenerateDocumentButton scope="test_case" buildRequestBody={() => ({ testCaseId: id })} />
           <Button
-            disabled={!environmentId || startExecution.isPending}
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={deleteTestCase.isPending}
             onClick={() => {
-              // Starting a run navigates straight to the execution page via `router.push`
-              // on success (see startExecution's onSuccess above), not an <a> click, so
-              // useUnsavedChangesGuard's click interceptor never sees it - check directly.
-              if (
-                isDirty &&
-                !window.confirm("You have unsaved changes on this test case. Start the run without saving them?")
-              ) {
-                return;
-              }
-              startExecution.mutate({ testCaseId: id, environmentId });
+              if (!confirm(`Delete ${displayId} "${testCase.title}"? This cannot be undone.`)) return;
+              deleteTestCase.mutate(
+                { id },
+                { onSuccess: () => router.push(`/products/${testCase.productId}?artifact=testCases&level=${testCase.levelId}`) },
+              );
             }}
           >
-            {startExecution.isPending ? "Starting..." : "Run test"}
+            {deleteTestCase.isPending ? "Deleting..." : "Delete"}
           </Button>
         </div>
-      </Card>
-      {startExecution.error && <p className="mt-2 text-sm text-destructive">{startExecution.error.message}</p>}
+      </div>
+      {deleteTestCase.error && <p className="px-5 pt-2 text-sm text-destructive">{deleteTestCase.error.message}</p>}
 
-      <h2 className="mt-10 text-sm font-medium text-foreground">Execution history</h2>
-      <ul className="mt-3 divide-y divide-border overflow-hidden rounded-md border text-sm">
+      <div className="flex items-stretch">
+        {/* Left column: title, custom fields, links, steps, save bar. */}
+        <form
+          className="min-w-0 flex-1 space-y-5 p-5 pb-8"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <div className="flex items-start gap-3.5 border-b border-border pb-3.5">
+            <span className="mt-1.5 bg-foreground px-1.5 py-0.5 font-mono text-[13px] font-medium text-background">{displayId}</span>
+            <div className="min-w-0 flex-1">
+              <Input
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="h-auto border-0 bg-transparent p-0 font-heading text-[28px] leading-tight tracking-tight focus-visible:ring-0"
+              />
+              {effectiveRequirementLinks.length > 0 && (
+                <p className="mt-1 text-[13.5px] text-muted-foreground">
+                  Covers{" "}
+                  {effectiveRequirementLinks.map((r, i) => (
+                    <span key={r.id}>
+                      {i > 0 && ", "}
+                      <Link href={`/requirements/${r.id}`} className="font-mono text-[12.5px] text-foreground hover:text-primary">
+                        {formatItemId(r.levelCode, r.sequenceNumber)}
+                      </Link>
+                    </span>
+                  ))}{" "}
+                  · {steps.length} step{steps.length === 1 ? "" : "s"}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <CustomFieldInputs
+            fields={customFieldDefs}
+            state={customFieldState}
+            onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
+          />
+
+          <Label className="flex-col items-start gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Linked requirements (applies to the whole test case, independent of any step link)
+            </span>
+            <RequirementPicker options={requirementOptions.data ?? []} value={requirementIds} onChange={setRequirementIds} />
+          </Label>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h5 className="font-heading text-[13px] tracking-[0.14em] text-muted-foreground uppercase">Steps</h5>
+            </div>
+            <TestStepsEditor steps={steps} onChange={setSteps} requirementOptions={requirementOptions.data ?? []} />
+          </div>
+
+          {updateTestCase.error && <p className="text-sm text-destructive">{updateTestCase.error.message}</p>}
+
+          {/* Not fixed to the viewport any more - a 1px top rule at the end of the
+              form, per the handoff. */}
+          <div className="flex items-center gap-2.5 border-t border-border pt-3">
+            <Button type="submit" disabled={updateTestCase.isPending || !isDirty}>
+              {updateTestCase.isPending ? "Saving…" : "Save changes"}
+              <span className="ml-1.5 border border-primary-foreground/45 px-1 font-mono text-[10px] font-normal normal-case">⌘S</span>
+            </Button>
+            <Button type="button" variant="outline" onClick={discardChanges} disabled={updateTestCase.isPending || !isDirty}>
+              Discard
+            </Button>
+            {isDirty && <span className="ml-auto text-[13px] text-muted-foreground">Unsaved edits</span>}
+          </div>
+        </form>
+
+        <ContextRail
+          testCaseId={id}
+          productId={testCase.productId}
+          testCaseTitle={title}
+          testCaseDisplayId={displayId}
+          steps={steps}
+          onAcceptAiSteps={setSteps}
+          requirementOptions={requirementOptions.data ?? []}
+          executions={executions}
+          isDirty={isDirty}
+        />
+      </div>
+
+      {executions.length > 0 && (
+        <div className="border-t border-border px-5 py-3">
+          <BulkSection testCaseId={id} executions={executions} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Bulk-select a few of this test case's own executions to zip up as separate reports
+ * (backlog item 9.32) - kept as its own small piece below the two-column layout, since
+ * the rail's own History tab is a compact roster, not the right place for a multi-select
+ * bulk action. */
+function BulkSection({ testCaseId, executions }: { testCaseId: string; executions: Array<{ id: string; startedAt: string | Date }> }) {
+  const [selectedExecutionIds, setSelectedExecutionIds] = useState<Set<string>>(new Set());
+  if (executions.length === 0) return null;
+  return (
+    <div className="flex items-center gap-3">
+      <p className="text-[13px] text-muted-foreground">Select executions to bundle into one report:</p>
+      <div className="flex flex-wrap gap-1.5">
         {executions.map((ex) => (
-          <li key={ex.id} className="flex items-center gap-2 px-3 py-1">
+          <label key={ex.id} className="flex cursor-pointer items-center gap-1.5 border border-border px-2 py-1 text-xs">
             <input
               type="checkbox"
               className="accent-primary"
@@ -364,39 +349,18 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
                   return next;
                 })
               }
-              aria-label={`Select execution from ${new Date(ex.startedAt).toLocaleString()}`}
             />
-            <Link
-              href={`/test-cases/${id}/executions/${ex.id}`}
-              className="flex flex-1 items-center justify-between gap-3 rounded py-1.5 transition-colors hover:bg-muted/50"
-            >
-              <span>
-                {ex.environmentName} · {new Date(ex.startedAt).toLocaleString()}
-              </span>
-              <ResultBadge status={ex.status} />
-            </Link>
-          </li>
+            {new Date(ex.startedAt).toLocaleDateString()}
+          </label>
         ))}
-      </ul>
-      {executions.length === 0 && <p className="text-sm text-muted-foreground">No executions yet.</p>}
+      </div>
       {selectedExecutionIds.size > 0 && (
-        <div className="mt-3">
-          <BulkGenerateDocumentButton
-            scope="test_execution"
-            ids={[...selectedExecutionIds]}
-            onDone={() => setSelectedExecutionIds(new Set())}
-          />
-        </div>
+        <BulkGenerateDocumentButton
+          scope="test_execution"
+          ids={[...selectedExecutionIds]}
+          onDone={() => setSelectedExecutionIds(new Set())}
+        />
       )}
-      </main>
-
-      <AiToolsPanel
-        productId={testCase.productId}
-        testCaseTitle={title}
-        steps={steps}
-        onAccept={setSteps}
-        requirementOptions={requirementOptions.data ?? []}
-      />
-    </>
+    </div>
   );
 }

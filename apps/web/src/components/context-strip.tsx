@@ -11,37 +11,45 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { trpc } from "@/lib/trpc-client";
-import { ChevronDown, Settings } from "lucide-react";
+import { ChevronDown, Search, Settings } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { SignOutButton } from "./sign-out-button";
 
 /**
- * Persistent, deliberately quiet top bar - see the "Galm Navigation Blueprint" review
- * artifact this implements. One line, no border-heavy tab styling: it's background
- * information you register while working, not a nav bar you look for. `TopBar` is the
- * shell every authenticated page renders (its own top element, not a shared layout slot -
- * simpler than threading page-specific content through a Next.js layout);
- * `ProductContextStrip` builds the left-hand content for pages scoped to one product.
+ * Two-row app shell (design_handoff_shell_restructure/README.md's "2a" proposal),
+ * replacing the earlier single-line strip. `TopBar` is the shell every authenticated
+ * page renders (its own top element, not a shared layout slot - simpler than threading
+ * page-specific content through a Next.js layout): row 1 is identity/product/search/
+ * user, always present; row 2 (artifact tabs + level rail) is product-scoped, so plain
+ * pages (Settings, the product list) render `<TopBar />` with nothing else and get row 1
+ * alone. `ProductContextStrip` builds both rows for a page scoped to one product.
  *
- * The three dropdowns (product switcher, level picker, avatar menu) were originally plain
- * `<details>`/`<summary>` - functional, but no real keyboard nav, no managed focus, and
- * `<details>`'s built-in disclosure triangle only strips cleanly in Chromium. Now backed by
- * shadcn's DropdownMenu (Base UI underneath) for the same reason EsignModal moved to
- * Dialog - real accessibility primitives instead of hand-rolled ones.
+ * The dropdowns (product switcher, avatar menu) are shadcn's DropdownMenu (Base UI
+ * underneath) for real keyboard nav/managed focus, not hand-rolled `<details>`.
  */
-export function TopBar({ left }: { left?: React.ReactNode }) {
+export function TopBar({ productSwitcher, row2 }: { productSwitcher?: ReactNode; row2?: ReactNode }) {
   return (
-    <div className="flex items-center gap-2 border-b bg-background px-4 py-2 text-sm">
-      {/* `min-w-0` is load-bearing - a flex item won't shrink below its content's
-          natural width by default, so without it this row's several items push the
-          whole page wider than the viewport on narrow screens. `overflow-x-auto` lets
-          this row scroll internally instead, if it still doesn't fit. */}
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">{left}</div>
-      {/* `shrink-0` so the avatar/settings icons stay reachable, never squeezed by the
-          now-scrollable content beside them. */}
-      <div className="flex shrink-0 items-center gap-2">
-        <UserCorner />
+    <div className="border-b border-border bg-card">
+      <div className="flex items-stretch">
+        <div className="flex items-center border-r border-border px-4">
+          <span className="font-heading text-[15px] tracking-[0.14em] text-foreground uppercase">galm</span>
+        </div>
+        {productSwitcher}
+        <div className="flex-1" />
+        {/* Global search affordance - nothing wired to it yet, so it renders inert
+            rather than pretending a jump-to-item feature exists (see the handoff's own
+            "if nothing exists, render as a disabled affordance" note). */}
+        <div className="flex items-center gap-2 border-l border-border px-3.5 text-muted-foreground opacity-45">
+          <Search className="size-[15px]" strokeWidth={1.5} />
+          <span className="text-[13.5px]">Jump to item</span>
+          <span className="border border-border px-1 font-mono text-[10.5px]">⌘K</span>
+        </div>
+        <div className="flex items-center gap-2.5 border-l border-border px-3.5">
+          <UserCorner />
+        </div>
       </div>
+      {row2}
     </div>
   );
 }
@@ -54,7 +62,10 @@ function UserCorner() {
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <DropdownMenuTrigger
+          className="flex size-6 items-center justify-center bg-primary font-mono text-[11px] font-semibold text-primary-foreground outline-none"
+          aria-label="Account menu"
+        >
           {initials}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
@@ -72,12 +83,8 @@ function UserCorner() {
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Link
-        href="/settings"
-        title="Settings"
-        className="flex h-7 w-7 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted"
-      >
-        <Settings className="size-4" />
+      <Link href="/settings" title="Settings" className="flex text-muted-foreground hover:text-foreground">
+        <Settings className="size-4" strokeWidth={1.5} />
       </Link>
     </>
   );
@@ -93,11 +100,17 @@ function initialsFor(name?: string, email?: string): string {
 
 type Artifact = "requirements" | "testCases" | "traceability";
 
-/** The left-hand content for any page scoped to one product: a rarely-used product
- * switcher, the Requirements/Test Cases toggle (separate contexts - picking one swaps
- * which level set applies, never both at once), and the level dropdown for whichever is
- * active. `activeLevelId` may be null while data is loading - the trigger just shows a
- * placeholder until it resolves. */
+const ARTIFACT_TABS: ReadonlyArray<{ key: Artifact; label: string }> = [
+  { key: "requirements", label: "Requirements" },
+  { key: "testCases", label: "Test cases" },
+  { key: "traceability", label: "Traceability" },
+];
+
+/** Both rows for a page scoped to one product: row 1 adds the product switcher (a
+ * rarely-used dropdown, per-tenant); row 2 is the artifact tabs plus, for whichever
+ * artifact is active, that artifact's level rail (absent for traceability - it
+ * deliberately spans every level at once). `activeLevelId` may be null while data is
+ * loading - the active cell just doesn't highlight yet. */
 export function ProductContextStrip({
   productId,
   artifact,
@@ -112,86 +125,72 @@ export function ProductContextStrip({
   const testLevels = trpc.testCases.listLevels.useQuery();
 
   const productName = products.data?.find((p) => p.id === productId)?.name ?? "Product";
-  // No level dropdown for the traceability tab - it deliberately spans every level at once.
   const levels = artifact === "requirements" ? requirementLevels.data : artifact === "testCases" ? testLevels.data : null;
 
   return (
     <TopBar
-      left={
-        <>
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
-              {productName}
-              <ChevronDown className="size-3.5 text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              {products.data?.map((p) => (
-                <DropdownMenuItem
-                  key={p.id}
-                  render={<Link href={`/products/${p.id}`} />}
-                  className={p.id === productId ? "bg-accent font-medium" : undefined}
-                >
-                  {p.name}
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem render={<Link href="/products" />} className="text-muted-foreground">
-                All products
+      productSwitcher={
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex items-center gap-2 border-r border-border px-4 outline-none">
+            <span className="flex flex-col items-start leading-tight">
+              <span className="font-mono text-[10.5px] tracking-[0.1em] text-muted-foreground">PRODUCT</span>
+              <span className="text-[15px] font-medium text-foreground">{productName}</span>
+            </span>
+            <ChevronDown className="size-[13px] text-muted-foreground" strokeWidth={1.5} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            {products.data?.map((p) => (
+              <DropdownMenuItem
+                key={p.id}
+                render={<Link href={`/products/${p.id}`} />}
+                className={p.id === productId ? "bg-accent font-medium" : undefined}
+              >
+                {p.name}
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <span className="text-muted-foreground/50">/</span>
-
-          <div className="inline-flex rounded-md bg-muted p-0.5">
-            <Link
-              href={`/products/${productId}?artifact=requirements`}
-              className={`rounded px-2.5 py-1 text-sm font-medium ${
-                artifact === "requirements" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Requirements
-            </Link>
-            <Link
-              href={`/products/${productId}?artifact=testCases`}
-              className={`rounded px-2.5 py-1 text-sm font-medium ${
-                artifact === "testCases" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Test Cases
-            </Link>
-            <Link
-              href={`/products/${productId}?artifact=traceability`}
-              className={`rounded px-2.5 py-1 text-sm font-medium ${
-                artifact === "traceability" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Traceability
-            </Link>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem render={<Link href="/products" />} className="text-muted-foreground">
+              All products
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      }
+      row2={
+        <div className="flex items-stretch justify-between border-b border-border bg-background">
+          <div className="flex items-stretch">
+            {ARTIFACT_TABS.map((tab) => (
+              <Link
+                key={tab.key}
+                href={`/products/${productId}?artifact=${tab.key}`}
+                className={`flex items-center border-b-2 px-4 font-heading text-[13.5px] tracking-[0.1em] uppercase ${
+                  artifact === tab.key ? "border-primary text-foreground" : "border-transparent text-muted-foreground"
+                }`}
+              >
+                {tab.label}
+              </Link>
+            ))}
           </div>
-
           {levels && levels.length > 0 && (
-            <>
-              <span className="text-muted-foreground/50">/</span>
-              <DropdownMenu>
-                <DropdownMenuTrigger className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
-                  {levels.find((l) => l.id === activeLevelId)?.name ?? "Level"}
-                  <ChevronDown className="size-3.5 text-muted-foreground" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56">
-                  {levels.map((level) => (
-                    <DropdownMenuItem
-                      key={level.id}
-                      render={<Link href={`/products/${productId}?artifact=${artifact}&level=${level.id}`} />}
-                    >
-                      {level.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
+            <div className="flex items-center gap-2.5 py-1.5 pr-4">
+              <span className="font-mono text-[10.5px] tracking-[0.1em] text-muted-foreground">LEVEL</span>
+              <div className="flex">
+                {levels.map((level) => (
+                  <Link
+                    key={level.id}
+                    href={`/products/${productId}?artifact=${artifact}&level=${level.id}`}
+                    className={`flex items-center border px-2.5 py-[3px] font-mono text-xs font-medium -ml-px first:ml-0 ${
+                      level.id === activeLevelId
+                        ? "z-10 border-primary bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground"
+                    }`}
+                  >
+                    {level.code}
+                  </Link>
+                ))}
+              </div>
+            </div>
           )}
-        </>
+        </div>
       }
     />
   );

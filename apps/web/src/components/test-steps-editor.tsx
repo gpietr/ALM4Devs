@@ -120,7 +120,9 @@ export function TestStepsEditor({
               const editing = editingKeys.has(step.key);
               return (
                 <TableRow key={step.key} className="align-top">
-                  <TableCell className="pt-3 text-center font-mono text-xs text-muted-foreground">{i + 1}</TableCell>
+                  <TableCell className="pt-3 text-center font-mono text-[11.5px] text-muted-foreground">
+                    {String(i + 1).padStart(2, "0")}
+                  </TableCell>
                   {editing ? (
                     // While editing, Description and Expected result share ONE cell
                     // (colSpan across both their columns) stacked vertically instead of
