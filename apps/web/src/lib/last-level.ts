@@ -1,6 +1,6 @@
 "use client";
 
-const KEY = "galm:lastLevelByArtifact";
+const KEY = "alm4devs:lastLevelByArtifact";
 
 type Artifact = "requirements" | "testCases";
 

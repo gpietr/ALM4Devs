@@ -54,7 +54,26 @@ export const ToolbarSection: React.FC<ToolbarSectionProps> = ({
     (action: FormatAction) => (
       <ToolbarButton
         key={action.label}
-        onClick={() => action.action(editor)}
+        onClick={(event) => {
+          // Phantom post-focus clicks have been observed targeting the first toolbar
+          // control with coordinates that aren't actually over the button. Ignore those
+          // so they can't run toggleBold()/etc.; a real click lands inside the rect.
+          const { clientX, clientY } = event
+          const rect = event.currentTarget.getBoundingClientRect()
+          const inside =
+            clientX >= rect.left &&
+            clientX <= rect.right &&
+            clientY >= rect.top &&
+            clientY <= rect.bottom
+          if (!inside) return
+          action.action(editor)
+        }}
+        onFocus={() => {
+          // Format toggles must never keep keyboard focus. A phantom focusin still lands
+          // on Bold after clicking into the editor; if it sticks, typing highlights B
+          // instead of inserting text. (Only on plain toggles here - not dropdown triggers.)
+          editor.view.focus()
+        }}
         disabled={!action.canExecute(editor)}
         isActive={action.isActive(editor)}
         tooltip={`${action.label} ${action.shortcuts.map((s) => getShortcutKey(s).symbol).join(" ")}`}

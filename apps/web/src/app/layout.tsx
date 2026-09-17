@@ -30,7 +30,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata = {
-  title: "galm",
+  title: "ALM4Devs",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

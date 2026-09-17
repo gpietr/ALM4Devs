@@ -31,11 +31,24 @@ export const ToolbarButton = ({
   // toolbar button first. Buttons stay fully mouse-clickable and screen-reader-discoverable
   // via the editor's own labelling; only their sequential-tab-order stop is removed. An
   // explicit tabIndex passed by a caller (none currently do) still wins.
+  // onMouseDown preventDefault is the standard Tiptap/ProseMirror toolbar guard: without
+  // it, mousedown steals focus from the contenteditable and collapses the selection
+  // before click runs toggleBold()/etc. Explicit caller onMouseDown (if any) still runs
+  // after this via the spread-then-override pattern below... except we need preventDefault
+  // to always win, so call both.
+  const { onMouseDown, ...rest } = props
   const toggleButton = (
     <Toggle
+      // Controlled by the editor's mark state - an uncontrolled Toggle would keep its own
+      // pressed flip from the known phantom post-focus click even when toggleBold is blocked.
+      pressed={!!isActive}
       className={cn({ "bg-accent": isActive }, className)}
-      {...props}
+      {...rest}
       tabIndex={props.tabIndex ?? -1}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        onMouseDown?.(e)
+      }}
     >
       {children}
     </Toggle>

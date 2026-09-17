@@ -32,6 +32,7 @@ export default function LogInPage() {
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-1">
+          <p className="font-heading text-[18px] tracking-[0.08em] text-foreground">ALM4Devs</p>
           <h1 className="text-xl font-semibold tracking-tight">Log in</h1>
           <p className="text-sm text-muted-foreground">Welcome back.</p>
         </div>

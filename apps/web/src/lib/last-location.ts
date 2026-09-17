@@ -1,6 +1,6 @@
 "use client";
 
-const KEY = "galm:lastLocation";
+const KEY = "alm4devs:lastLocation";
 
 export interface LastLocation {
   productId: string;

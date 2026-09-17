@@ -13,7 +13,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type RailTab = "run" | "ai" | "history";
-const TAB_PREF_KEY = "galm:contextRailTab";
+const TAB_PREF_KEY = "alm4devs:contextRailTab";
 
 function getPreferredTab(): RailTab | null {
   try {

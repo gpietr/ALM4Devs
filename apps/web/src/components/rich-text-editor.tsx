@@ -63,7 +63,7 @@ export function RichTextEditor({
       // left almost no visible room for actual content. min-h-40 (10rem) reserves real
       // typing/reading space regardless of how little has been typed yet; p-3 keeps text
       // off the border.
-      editorClassName={compact ? "min-h-16 p-2" : "min-h-40 p-3"}
+      editorClassName={compact ? "min-h-16 p-2 font-normal" : "min-h-40 p-3 font-normal"}
       className="w-full bg-background font-normal"
     />
   );

@@ -13,6 +13,7 @@ import { LinkBubbleMenu } from "./components/bubble-menu/link-bubble-menu"
 import { useMinimalTiptapEditor } from "./hooks/use-minimal-tiptap"
 import { MeasuredContainer } from "./components/measured-container"
 import { useTiptapEditor } from "./hooks/use-tiptap-editor"
+import { useEffect } from "react"
 
 export interface MinimalTiptapProps extends Omit<
   UseMinimalTiptapEditorProps,
@@ -36,21 +37,21 @@ export interface MinimalTiptapProps extends Omit<
 // This mirrors the old homebrew toolbar's footprint while keeping the new engine's
 // mark-persistence fix.
 //
-// SectionTwo (plain formatting toggles: Bold/Italic/Underline) is deliberately FIRST, ahead
-// of SectionOne's heading menu - not just cosmetic ordering. Verified with a real headless
+// SectionTwo (plain formatting toggles: Bold/Italic/Underline) stays FIRST, ahead of
+// SectionOne's heading menu - not just cosmetic ordering. Verified with a real headless
 // click: the very first click into a freshly-mounted editor produces a genuine but
 // transient extra focusin+click on whatever toolbar element is first in DOM order,
-// immediately after the real click/focus on the editor itself - reproducible regardless of
-// which component happens to be first (confirmed by moving Section One out and back). A
-// plain toggle button absorbs that stray event harmlessly (Tiptap's own focus-sync effect
-// then quietly corrects focus back to the editor a moment later, and typing works). A
-// dropdown/popover/dialog trigger (heading menu, link, image, the overflow "more" menus)
-// does not recover: Base UI's Menu/Popover/Dialog open on `mousedown` and, once open,
-// deliberately hold focus inside themselves (real, correct behavior for a *deliberately*
-// opened menu) - which is exactly what turned this stray event into the reported "can't
-// type, focus jumps to the toolbar" bug. Keeping a plain toggle first sidesteps it; the
-// underlying stray-event cause is still not fully understood and may be worth a follow-up
-// if it resurfaces elsewhere.
+// immediately after the real click/focus on the editor itself. A dropdown trigger does
+// not recover from that (Base UI opens on mousedown and holds focus); a plain toggle
+// first still avoids the "can't type" failure mode for menus.
+//
+// The stray click also used to run toggleBold(). Fixes that don't steal typing focus:
+// (1) format-button onClick ignores events whose coordinates aren't inside the button,
+// (2) Toggle `pressed` is controlled from editor.isActive, (3) any focus that lands on a
+// toolbar button is immediately bounced back to the editor (toolbar uses tabIndex=-1 and
+// mousedown-preventDefault already, but the phantom focusin still arrives), (4) empty
+// editors clear leftover stored marks shortly after focus.
+//
 // min-w-0 matters as much as overflow-x-auto here: as a flex-col child (see
 // MainMinimalTiptapEditor's MeasuredContainer below), this div defaults to
 // min-width:auto, which refuses to shrink below its own content's intrinsic width
@@ -59,47 +60,75 @@ export interface MinimalTiptapProps extends Omit<
 // narrow table cell) wider instead. min-w-0 is what lets it actually shrink and scroll
 // internally, however narrow its container ends up being (a compact test-step table cell,
 // in practice).
-const Toolbar = ({ editor }: { editor: Editor }) => (
-  <div className="border-border flex h-9 min-w-0 shrink-0 overflow-x-auto border-b px-1 py-1">
-    <div className="flex w-max items-center gap-0.5">
-      <SectionTwo
-        editor={editor}
-        activeActions={[
-          "bold",
-          "italic",
-          "underline",
-          "strikethrough",
-          "code",
-          "clearFormatting",
-        ]}
-        mainActionCount={3}
-        size="sm"
-      />
 
-      <Separator orientation="vertical" className="mx-1" />
+function useClearPhantomMarksOnEmptyFocus(editor: Editor) {
+  useEffect(() => {
+    const onFocus = () => {
+      window.setTimeout(() => {
+        if (editor.isDestroyed || !editor.isEmpty) return
+        if (
+          editor.isActive("bold") ||
+          editor.isActive("italic") ||
+          editor.isActive("underline") ||
+          editor.isActive("strike") ||
+          editor.isActive("code")
+        ) {
+          editor.commands.unsetAllMarks()
+        }
+      }, 0)
+    }
+    editor.on("focus", onFocus)
+    return () => {
+      editor.off("focus", onFocus)
+    }
+  }, [editor])
+}
 
-      <SectionOne editor={editor} activeLevels={[1, 2, 3]} size="sm" />
+const Toolbar = ({ editor }: { editor: Editor }) => {
+  useClearPhantomMarksOnEmptyFocus(editor)
 
-      <Separator orientation="vertical" className="mx-1" />
+  return (
+    <div className="border-border flex h-9 min-w-0 shrink-0 overflow-x-auto border-b px-1 py-1">
+      <div className="flex w-max items-center gap-0.5">
+        <SectionTwo
+          editor={editor}
+          activeActions={[
+            "bold",
+            "italic",
+            "underline",
+            "strikethrough",
+            "code",
+            "clearFormatting",
+          ]}
+          mainActionCount={3}
+          size="sm"
+        />
 
-      <SectionFour
-        editor={editor}
-        activeActions={["orderedList", "bulletList"]}
-        mainActionCount={0}
-        size="sm"
-      />
+        <Separator orientation="vertical" className="mx-1" />
 
-      <Separator orientation="vertical" className="mx-1" />
+        <SectionOne editor={editor} activeLevels={[1, 2, 3]} size="sm" />
 
-      <SectionFive
-        editor={editor}
-        activeActions={["codeBlock", "blockquote"]}
-        mainActionCount={0}
-        size="sm"
-      />
+        <Separator orientation="vertical" className="mx-1" />
+
+        <SectionFour
+          editor={editor}
+          activeActions={["orderedList", "bulletList"]}
+          mainActionCount={0}
+          size="sm"
+        />
+
+        <Separator orientation="vertical" className="mx-1" />
+
+        <SectionFive
+          editor={editor}
+          activeActions={["codeBlock", "blockquote"]}
+          mainActionCount={0}
+          size="sm"
+        />
+      </div>
     </div>
-  </div>
-)
+  )
+}
 
 export const MinimalTiptapEditor = ({
   value,

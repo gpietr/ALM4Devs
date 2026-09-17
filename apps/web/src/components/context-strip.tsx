@@ -47,10 +47,10 @@ export function TopBar({
       <div className="flex items-stretch">
         <Link
           href="/"
-          className="flex items-center border-r border-border px-4 font-heading text-[15px] tracking-[0.14em] text-foreground uppercase hover:bg-muted/50"
+          className="flex items-center border-r border-border px-4 font-heading text-[15px] tracking-[0.08em] text-foreground hover:bg-muted/50"
           title="Home"
         >
-          galm
+          ALM4Devs
         </Link>
         {productSwitcher}
         <div className="flex-1" />
