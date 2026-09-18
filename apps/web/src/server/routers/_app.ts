@@ -8,6 +8,7 @@ import { settingsRouter } from "./settings";
 import { spiraImportRouter } from "./spira-import";
 import { testCasesRouter } from "./test-cases";
 import { traceabilityRouter } from "./traceability";
+import { vulnerabilitiesRouter } from "./vulnerabilities";
 
 export const appRouter = router({
   me: protectedProcedure.query(({ ctx }) => {
@@ -27,6 +28,7 @@ export const appRouter = router({
   testCases: testCasesRouter,
   spiraImport: spiraImportRouter,
   traceability: traceabilityRouter,
+  vulnerabilities: vulnerabilitiesRouter,
 });
 
 export type AppRouter = typeof appRouter;

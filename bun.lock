@@ -18,6 +18,7 @@
         "@galm/db": "workspace:*",
         "@galm/documents": "workspace:*",
         "@galm/integrations-llm": "workspace:*",
+        "@galm/integrations-nvd": "workspace:*",
         "@galm/integrations-spira": "workspace:*",
         "@galm/jobs": "workspace:*",
         "@galm/storage": "workspace:*",
@@ -118,6 +119,14 @@
         "@ai-sdk/openai-compatible": "^3.0.49",
         "ai": "^7.0.102",
         "zod": "^3.25.76",
+      },
+    },
+    "packages/integrations/nvd": {
+      "name": "@galm/integrations-nvd",
+      "version": "0.0.1",
+      "dependencies": {
+        "@galm/core": "workspace:*",
+        "@galm/db": "workspace:*",
       },
     },
     "packages/integrations/spira": {
@@ -343,6 +352,8 @@
     "@galm/documents": ["@galm/documents@workspace:packages/documents"],
 
     "@galm/integrations-llm": ["@galm/integrations-llm@workspace:packages/integrations/llm"],
+
+    "@galm/integrations-nvd": ["@galm/integrations-nvd@workspace:packages/integrations/nvd"],
 
     "@galm/integrations-spira": ["@galm/integrations-spira@workspace:packages/integrations/spira"],
 

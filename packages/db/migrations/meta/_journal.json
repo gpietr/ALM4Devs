@@ -134,6 +134,34 @@
       "when": 1789707403175,
       "tag": "0019_architecture_nodes_parent_id_index",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789710473699,
+      "tag": "0020_groovy_ironclad",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789720000000,
+      "tag": "0021_vulnerability_annotations_toggles",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789730000000,
+      "tag": "0022_architecture_node_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789740000000,
+      "tag": "0023_vulnerability_annotations_assessed_notes",
+      "breakpoints": true
     }
   ]
 }

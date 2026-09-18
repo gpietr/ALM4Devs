@@ -79,6 +79,7 @@ export const architectureRouter = router({
         description: z.string().trim().max(20000).optional(),
         supplier: z.string().trim().max(300).optional(),
         version: z.string().trim().max(100).optional(),
+        cpe: z.string().trim().max(500).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -95,6 +96,7 @@ export const architectureRouter = router({
           description: input.description,
           supplier: input.supplier,
           version: input.version,
+          cpe: input.cpe,
           createdBy: userId,
         }),
       ).catch(toBadRequest);
@@ -108,7 +110,6 @@ export const architectureRouter = router({
         description: z.string().trim().max(20000).optional(),
         parentId: z.string().uuid().nullable().optional(),
         supplier: z.string().trim().max(300).nullable().optional(),
-        version: z.string().trim().max(100).nullable().optional(),
         requirementIds: z.array(z.string().uuid()).optional(),
         testCaseIds: z.array(z.string().uuid()).optional(),
       }),
@@ -124,7 +125,6 @@ export const architectureRouter = router({
           description: input.description,
           parentId: input.parentId,
           supplier: input.supplier,
-          version: input.version,
           requirementIds: input.requirementIds,
           testCaseIds: input.testCaseIds,
           actorUserId: userId,

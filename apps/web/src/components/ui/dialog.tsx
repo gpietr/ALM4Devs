@@ -64,7 +64,7 @@ function DialogContent({
             this box) stays pinned in the corner. `min-h-0` is load-bearing - a flex
             child's default `min-height: auto` would let it grow past the parent's max-h
             instead of being constrained, leaving `overflow-y-auto` nothing to overflow. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">{children}</div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto">{children}</div>
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"

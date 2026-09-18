@@ -14,6 +14,7 @@
     "@galm/db": "workspace:*",
     "@galm/documents": "workspace:*",
     "@galm/integrations-llm": "workspace:*",
+    "@galm/integrations-nvd": "workspace:*",
     "@galm/integrations-spira": "workspace:*",
     "@galm/jobs": "workspace:*",
     "@galm/storage": "workspace:*",

@@ -93,6 +93,11 @@ const NAV_GROUPS: ReadonlyArray<{
         label: "Import",
         match: (p) => p.startsWith("/settings/import"),
       },
+      {
+        href: "/settings/nvd",
+        label: "NVD connection",
+        match: (p) => p === "/settings/nvd",
+      },
     ],
   },
 ];

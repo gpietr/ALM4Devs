@@ -1,5 +1,5 @@
 import { type TenantTx, schema } from "@galm/db";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getArchitectureLevel } from "./architecture-levels";
 import { writeAuditLog } from "./audit";
 import { DomainError } from "./errors";
@@ -11,6 +11,13 @@ export type ArchitectureKind = (typeof ARCHITECTURE_KINDS)[number];
 
 type ArchitectureNodeRow = typeof schema.architectureNodes.$inferSelect;
 
+export interface ArchitectureNodeVersionView {
+  id: string;
+  version: string;
+  cpe: string | null;
+  createdAt: Date;
+}
+
 export interface ArchitectureNodeView {
   id: string;
   kind: ArchitectureKind;
@@ -19,7 +26,11 @@ export interface ArchitectureNodeView {
   title: string;
   description: string;
   supplier: string | null;
-  version: string | null;
+  /** The OTS item's current recorded version, or null if none has been recorded yet (or
+   * this isn't an OTS node). See architecture_node_versions - version identity is
+   * append-only history, not a flat mutable field, so this is always the latest row rather
+   * than something edited in place. */
+  currentVersion: ArchitectureNodeVersionView | null;
   createdAt: Date;
   updatedAt: Date;
   levelCode: string;
@@ -82,6 +93,7 @@ export function generateMermaid(
 function nest(
   rows: ArchitectureNodeRow[],
   levelCode: string,
+  versionsByNodeId: Map<string, ArchitectureNodeVersionView>,
 ): ArchitectureNodeView[] {
   const views = new Map<string, ArchitectureNodeView>();
   for (const row of rows) {
@@ -93,7 +105,7 @@ function nest(
       title: row.title,
       description: row.description,
       supplier: row.supplier,
-      version: row.version,
+      currentVersion: versionsByNodeId.get(row.id) ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       ...displayOf(levelCode, row.sequenceNumber),
@@ -139,6 +151,91 @@ async function getRow(db: TenantTx, tenantId: string, id: string): Promise<Archi
     .from(schema.architectureNodes)
     .where(and(eq(schema.architectureNodes.id, id), eq(schema.architectureNodes.tenantId, tenantId)));
   if (!row) throw new DomainError(`architecture node ${id} not found`);
+  return row;
+}
+
+/** Batched "current version" lookup for a set of nodes - joins each node's
+ * currentVersionId to its architecture_node_versions row in one query, rather than N+1.
+ * Nodes with no version recorded yet (or non-OTS nodes, which never have one) simply have
+ * no entry in the returned map. */
+async function loadCurrentVersions(
+  db: TenantTx,
+  tenantId: string,
+  nodeIds: string[],
+): Promise<Map<string, ArchitectureNodeVersionView>> {
+  const map = new Map<string, ArchitectureNodeVersionView>();
+  if (nodeIds.length === 0) return map;
+  const rows = await db
+    .select({
+      nodeId: schema.architectureNodes.id,
+      id: schema.architectureNodeVersions.id,
+      version: schema.architectureNodeVersions.version,
+      cpe: schema.architectureNodeVersions.cpe,
+      createdAt: schema.architectureNodeVersions.createdAt,
+    })
+    .from(schema.architectureNodes)
+    .innerJoin(
+      schema.architectureNodeVersions,
+      eq(schema.architectureNodes.currentVersionId, schema.architectureNodeVersions.id),
+    )
+    .where(and(eq(schema.architectureNodes.tenantId, tenantId), inArray(schema.architectureNodes.id, nodeIds)));
+  for (const row of rows) {
+    map.set(row.nodeId, { id: row.id, version: row.version, cpe: row.cpe, createdAt: row.createdAt });
+  }
+  return map;
+}
+
+/** Full version history for one OTS node, newest first - for the node detail page's
+ * "Version history" list. Rows are immutable and never deleted (see
+ * architecture_node_versions' schema comment), so this is a permanent record. */
+export async function listArchitectureNodeVersions(
+  db: TenantTx,
+  tenantId: string,
+  architectureNodeId: string,
+): Promise<ArchitectureNodeVersionView[]> {
+  return db
+    .select({
+      id: schema.architectureNodeVersions.id,
+      version: schema.architectureNodeVersions.version,
+      cpe: schema.architectureNodeVersions.cpe,
+      createdAt: schema.architectureNodeVersions.createdAt,
+    })
+    .from(schema.architectureNodeVersions)
+    .where(
+      and(
+        eq(schema.architectureNodeVersions.tenantId, tenantId),
+        eq(schema.architectureNodeVersions.architectureNodeId, architectureNodeId),
+      ),
+    )
+    .orderBy(desc(schema.architectureNodeVersions.createdAt));
+}
+
+/** Loads one specific version row, scoped to both tenant and node - used when scanning a
+ * version other than the current one (see packages/integrations/nvd/src/scan.ts), so an
+ * arbitrary versionId can't be pointed at a version belonging to a different node or
+ * tenant. */
+export async function getArchitectureNodeVersion(
+  db: TenantTx,
+  tenantId: string,
+  architectureNodeId: string,
+  versionId: string,
+): Promise<ArchitectureNodeVersionView> {
+  const [row] = await db
+    .select({
+      id: schema.architectureNodeVersions.id,
+      version: schema.architectureNodeVersions.version,
+      cpe: schema.architectureNodeVersions.cpe,
+      createdAt: schema.architectureNodeVersions.createdAt,
+    })
+    .from(schema.architectureNodeVersions)
+    .where(
+      and(
+        eq(schema.architectureNodeVersions.tenantId, tenantId),
+        eq(schema.architectureNodeVersions.architectureNodeId, architectureNodeId),
+        eq(schema.architectureNodeVersions.id, versionId),
+      ),
+    );
+  if (!row) throw new DomainError(`version ${versionId} not found for this node`);
   return row;
 }
 
@@ -229,13 +326,19 @@ function descendantIds(rows: ArchitectureNodeRow[], rootId: string): Set<string>
 export async function listTree(db: TenantTx, tenantId: string, productId: string, levelId: string) {
   const level = await getArchitectureLevel(db, tenantId, levelId);
   const rows = await listRows(db, tenantId, productId, levelId);
+  const versionsByNodeId = await loadCurrentVersions(
+    db,
+    tenantId,
+    rows.map((r) => r.id),
+  );
   return {
     level,
-    tree: nest(rows, level.code),
+    tree: nest(rows, level.code, versionsByNodeId),
     mermaid: generateMermaid(rows, level.code),
     nodes: rows.map((row) => ({
       ...row,
       kind: asKind(row.kind),
+      currentVersion: versionsByNodeId.get(row.id) ?? null,
       ...displayOf(level.code, row.sequenceNumber),
     })),
   };
@@ -285,10 +388,13 @@ export async function getArchitectureNode(db: TenantTx, tenantId: string, id: st
       ...displayOf(level.code, candidate.sequenceNumber),
     }));
 
+  const versionsByNodeId = await loadCurrentVersions(db, tenantId, [row.id]);
+
   return {
     node: {
       ...row,
       kind,
+      currentVersion: versionsByNodeId.get(row.id) ?? null,
       ...displayOf(level.code, row.sequenceNumber),
     },
     parent: parent
@@ -304,6 +410,7 @@ export async function getArchitectureNode(db: TenantTx, tenantId: string, id: st
     canBeRoot: kind === "software_item",
     requirementLinks: await listRequirementLinksForNode(db, tenantId, row.id),
     testCaseLinks: await listTestCaseLinksForNode(db, tenantId, row.id),
+    versionHistory: kind === "ots" ? await listArchitectureNodeVersions(db, tenantId, row.id) : [],
   };
 }
 
@@ -319,6 +426,7 @@ export async function createArchitectureNode(
     description?: string;
     supplier?: string | null;
     version?: string | null;
+    cpe?: string | null;
     createdBy: string;
   },
 ) {
@@ -332,8 +440,11 @@ export async function createArchitectureNode(
     parentId: params.parentId ?? null,
   });
 
-  if (kind !== "ots" && (params.supplier || params.version)) {
-    throw new DomainError("supplier and version are only valid on OTS items");
+  if (kind !== "ots" && (params.supplier || params.version || params.cpe)) {
+    throw new DomainError("supplier, version, and cpe are only valid on OTS items");
+  }
+  if (kind === "ots" && params.cpe?.trim() && !params.version?.trim()) {
+    throw new DomainError("a version is required when providing a CPE");
   }
 
   const sequenceNumber = await nextSequenceNumber(db, params.tenantId, params.productId, params.levelId);
@@ -349,11 +460,30 @@ export async function createArchitectureNode(
       title: params.title,
       description: params.description ?? "",
       supplier: kind === "ots" ? params.supplier?.trim() || null : null,
-      version: kind === "ots" ? params.version?.trim() || null : null,
       createdBy: params.createdBy,
     })
     .returning();
   if (!node) throw new DomainError("failed to create architecture node");
+
+  let currentVersion: ArchitectureNodeVersionView | null = null;
+  if (kind === "ots" && params.version?.trim()) {
+    const [versionRow] = await db
+      .insert(schema.architectureNodeVersions)
+      .values({
+        tenantId: params.tenantId,
+        architectureNodeId: node.id,
+        version: params.version.trim(),
+        cpe: params.cpe?.trim() || null,
+        createdBy: params.createdBy,
+      })
+      .returning();
+    if (!versionRow) throw new DomainError("failed to record initial version");
+    await db
+      .update(schema.architectureNodes)
+      .set({ currentVersionId: versionRow.id })
+      .where(eq(schema.architectureNodes.id, node.id));
+    currentVersion = versionRow;
+  }
 
   const ids = displayOf(level.code, sequenceNumber);
   await writeAuditLog(db, {
@@ -365,7 +495,7 @@ export async function createArchitectureNode(
     payload: { kind, title: params.title, displayId: ids.displayId, parentId: node.parentId },
   });
 
-  return { node: { ...node, kind, ...ids } };
+  return { node: { ...node, kind, currentVersion, currentVersionId: currentVersion?.id ?? null, ...ids } };
 }
 
 export async function updateArchitectureNode(
@@ -377,7 +507,6 @@ export async function updateArchitectureNode(
     description?: string;
     parentId?: string | null;
     supplier?: string | null;
-    version?: string | null;
     requirementIds?: string[];
     testCaseIds?: string[];
     actorUserId: string;
@@ -397,8 +526,8 @@ export async function updateArchitectureNode(
     rows,
   });
 
-  if (kind !== "ots" && (params.supplier || params.version)) {
-    throw new DomainError("supplier and version are only valid on OTS items");
+  if (kind !== "ots" && params.supplier) {
+    throw new DomainError("supplier is only valid on OTS items");
   }
 
   const [node] = await db
@@ -408,7 +537,6 @@ export async function updateArchitectureNode(
       description: params.description ?? existing.description,
       parentId,
       supplier: kind === "ots" ? (params.supplier !== undefined ? params.supplier?.trim() || null : existing.supplier) : null,
-      version: kind === "ots" ? (params.version !== undefined ? params.version?.trim() || null : existing.version) : null,
       updatedAt: new Date(),
     })
     .where(and(eq(schema.architectureNodes.id, params.id), eq(schema.architectureNodes.tenantId, params.tenantId)))
@@ -444,6 +572,63 @@ export async function updateArchitectureNode(
   });
 
   return { node: { ...node, kind, ...ids } };
+}
+
+/** Records a new version for an OTS item: always inserts a fresh, immutable
+ * architecture_node_versions row (never updates an existing one - see that table's schema
+ * comment for why) and re-points the node's currentVersionId at it. This is the only way
+ * `version`/`cpe` ever change - there is no "edit the current version in place" path, which
+ * is what makes a stale CPE (mismatched with a newer version's text) structurally
+ * impossible: you can't change one without recording both together. */
+export async function recordArchitectureNodeVersion(
+  db: TenantTx,
+  params: {
+    tenantId: string;
+    architectureNodeId: string;
+    version: string;
+    cpe?: string | null;
+    createdBy: string;
+  },
+) {
+  const existing = await getRow(db, params.tenantId, params.architectureNodeId);
+  const kind = asKind(existing.kind);
+  if (kind !== "ots") {
+    throw new DomainError("only OTS items can have a version recorded");
+  }
+  const version = params.version.trim();
+  if (!version) {
+    throw new DomainError("a version is required");
+  }
+
+  const [versionRow] = await db
+    .insert(schema.architectureNodeVersions)
+    .values({
+      tenantId: params.tenantId,
+      architectureNodeId: existing.id,
+      version,
+      cpe: params.cpe?.trim() || null,
+      createdBy: params.createdBy,
+    })
+    .returning();
+  if (!versionRow) throw new DomainError("failed to record version");
+
+  await db
+    .update(schema.architectureNodes)
+    .set({ currentVersionId: versionRow.id, updatedAt: new Date() })
+    .where(and(eq(schema.architectureNodes.id, existing.id), eq(schema.architectureNodes.tenantId, params.tenantId)));
+
+  const level = await getArchitectureLevel(db, params.tenantId, existing.levelId);
+  const ids = displayOf(level.code, existing.sequenceNumber);
+  await writeAuditLog(db, {
+    tenantId: params.tenantId,
+    actorUserId: params.createdBy,
+    action: "architecture.version_recorded",
+    entityType: "architecture_node",
+    entityId: existing.id,
+    payload: { displayId: ids.displayId, title: existing.title, version },
+  });
+
+  return { version: versionRow as ArchitectureNodeVersionView };
 }
 
 export async function deleteArchitectureNode(db: TenantTx, tenantId: string, id: string, actorUserId: string) {

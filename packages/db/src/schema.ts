@@ -6,6 +6,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   unique,
@@ -735,12 +736,15 @@ export const documentTemplateParameters = pgTable(
 // items may nest and contain units/OTS; units may contain OTS only ("this unit uses that
 // library"); OTS items are always leaves. Each (product, architecture-level) is its own
 // tree - parents cannot cross levels. Display ids reuse the shared levels/sequence-
-// counters machinery (SYSARCH-1, SWARCH-1, or a tenant's own code). No versioning - same
-// spirit as test cases.
+// counters machinery (SYSARCH-1, SWARCH-1, or a tenant's own code). No versioning for the
+// node's own content (title/description) - same spirit as test cases. OTS *version identity*
+// is the one exception: see `currentVersionId` below and `architecture_node_versions`.
 //
 // Links to requirements / test cases: see architecture_node_*_links below (many-to-many;
-// any node kind may link). Not in this table yet (deliberate cuts):
-// - SBOM / vulnerability records (will hang off OTS supplier+version)
+// any node kind may link). NVD vulnerability scanning hangs off the current version's
+// `version`/`cpe` (via vulnerability_scans/vulnerability_findings/vulnerability_annotations
+// further down this file) - not columns on this table itself. Not in this table yet
+// (deliberate cuts):
 // - Detailed design records on units
 export const architectureNodes = pgTable(
   "architecture_nodes",
@@ -763,9 +767,19 @@ export const architectureNodes = pgTable(
     sequenceNumber: integer("sequence_number").notNull(),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
-    // OTS identity only - unused (null) on items and units. Not an SBOM yet.
+    // OTS identity only - unused (null) on items and units.
     supplier: text("supplier"),
-    version: text("version"),
+    // Points at this OTS item's current architecture_node_versions row - null until a
+    // first version is recorded. No `.references()` here, deliberately: the version row it
+    // points to doesn't exist yet at the moment this node is first inserted (same
+    // circular-bootstrap reasoning as requirements.currentVersionId above; integrity is
+    // app-level only, enforced in packages/core/src/architecture.ts). `version`/`cpe` used
+    // to be flat mutable columns on this table directly - moved into their own versioned
+    // table (see below) because editing `version` in place could silently desync from an
+    // already-set `cpe` (a scan would then keep matching a stale version with no signal
+    // anything was wrong), and there was no way to tell a finding that's still relevant
+    // from one that only applied to a since-superseded version.
+    currentVersionId: uuid("current_version_id"),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id),
@@ -781,6 +795,34 @@ export const architectureNodes = pgTable(
     index("architecture_nodes_parent_id_idx").on(t.parentId),
   ],
 );
+
+// One row per recorded version of an OTS architecture item - immutable, append-only, never
+// updated or deleted (same shape as requirement_versions above: content lives only here,
+// never duplicated onto the parent). "Recording a new version" (packages/core/src/
+// architecture.ts's recordArchitectureNodeVersion) always inserts a new row here and
+// re-points architectureNodes.currentVersionId at it; it never mutates an existing row -
+// that immutability is what makes a stale CPE structurally impossible (you can't edit
+// `version` without going through a flow that also asks for/confirms `cpe` at the same
+// time) and what lets a UI tell "this finding was last confirmed under version 2.0, the
+// node is now on 2.1" from vulnerability_scans.architectureNodeVersionId below.
+export const architectureNodeVersions = pgTable("architecture_node_versions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  architectureNodeId: uuid("architecture_node_id")
+    .notNull()
+    .references(() => architectureNodes.id, { onDelete: "cascade" }),
+  version: text("version").notNull(),
+  // Exact CPE 2.3 string (e.g. "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*") for precise
+  // NVD vulnerability matching - nullable (falls back to a free-text supplier+title+version
+  // keyword search when absent; see packages/core/src/vulnerabilities.ts's buildScanQuery).
+  cpe: text("cpe"),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => user.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 // Many-to-many: architecture nodes (item/unit/OTS) ↔ requirements. Same product is
 // enforced in packages/core (not a DB constraint - requirements and nodes share tenant
@@ -816,6 +858,140 @@ export const architectureNodeTestCaseLinks = pgTable(
       .references(() => testCases.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.architectureNodeId, t.testCaseId] })],
+);
+
+// --- NVD vulnerability scanning for OTS architecture items --------------------------
+// One row per tenant, same shape/trust-boundary reasoning as spiraConnections/
+// llmConnections above (plaintext key, no KMS layer). Unlike those two, an unset key is
+// a legitimate, fully working configuration (NVD's public rate limit, 5 requests/30s,
+// still works with no key) - the settings UI and saveNvdConnection (packages/core/src/
+// nvd-connection.ts) both treat "no key" as a valid saved state, not an error, and offer
+// an explicit way to clear a previously-saved key rather than requiring a real one.
+export const nvdConnections = pgTable("nvd_connections", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  apiKey: text("api_key"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One row per user-triggered scan attempt of one OTS architecture node. This is an
+// operational read-model (cheap "last scanned"/"did it fail" lookups for the OTS view),
+// not the audit trail - a successful scan also gets a `writeAuditLog` entry
+// ("architecture.scan_completed"), same as every other architecture mutation; this table
+// exists because audit_log's generic jsonb payload can't be queried per-node on every
+// render the way a typed, indexed column here can.
+export const vulnerabilityScans = pgTable(
+  "vulnerability_scans",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    architectureNodeId: uuid("architecture_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+    // Which version was active when this scan ran - null for a scan predating this column
+    // (none exist yet) or, in principle, a scan somehow run with no version recorded (the
+    // app layer already blocks that). `set null` on delete: version rows aren't deletable
+    // today, but a scan's own history record shouldn't vanish if that ever changes.
+    architectureNodeVersionId: uuid("architecture_node_version_id").references(() => architectureNodeVersions.id, {
+      onDelete: "set null",
+    }),
+    triggeredBy: text("triggered_by")
+      .notNull()
+      .references(() => user.id),
+    query: text("query").notNull(),
+    // CHECK-constrained (manual migration): 'cpe' | 'keyword'.
+    matchType: text("match_type").notNull(),
+    resultCount: integer("result_count").notNull().default(0),
+    // CHECK-constrained (manual migration): 'completed' | 'failed'.
+    status: text("status").notNull(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // The OTS view needs "latest scan per node" for every row on every render - same
+    // "hot read path, index it explicitly" reasoning as architecture_nodes_parent_id_idx.
+    index("vulnerability_scans_architecture_node_id_idx").on(t.architectureNodeId, t.createdAt.desc()),
+  ],
+);
+
+// Denormalized per (architectureNodeId, cveId) - deliberately NOT a shared cross-tenant
+// CVE cache: this feature's whole point is a live NVD call on every user-triggered scan,
+// not cache-freshness logic, and a cross-tenant table would be this schema's first
+// exception to "every table has tenant_id". Upserted on every scan (insert new, refresh
+// cached fields + lastSeenAt + lastScanId on conflict, firstSeenAt left untouched); rows
+// are never deleted, so a CVE that stops appearing in NVD's response just stops having
+// its lastSeenAt advance rather than disappearing.
+export const vulnerabilityFindings = pgTable(
+  "vulnerability_findings",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    architectureNodeId: uuid("architecture_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+    cveId: text("cve_id").notNull(),
+    description: text("description").notNull(),
+    cvssScore: real("cvss_score"),
+    cvssVersion: text("cvss_version"),
+    severity: text("severity"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    lastModifiedAt: timestamp("last_modified_at", { withTimezone: true }),
+    sourceUrl: text("source_url").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).defaultNow().notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+    lastScanId: uuid("last_scan_id").references(() => vulnerabilityScans.id, { onDelete: "set null" }),
+  },
+  (t) => [primaryKey({ columns: [t.architectureNodeId, t.cveId] })],
+);
+
+// Persistent user triage, independent of vulnerability_findings on purpose (no FK to it):
+// this is what makes "re-scanning only needs to triage new vulnerabilities" work - if a
+// CVE temporarily drops out of an NVD response and reappears in a later scan, its
+// annotation is still there the moment it reappears, keyed by the same (architectureNodeId,
+// cveId) pair rather than by a findings row that scans keep overwriting.
+export const vulnerabilityAnnotations = pgTable(
+  "vulnerability_annotations",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    architectureNodeId: uuid("architecture_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+    cveId: text("cve_id").notNull(),
+    // Explicit "someone has looked at this" flag - independent of affectsProduct/
+    // falsePositive below. Without this, a reviewer who agrees with the safe defaults (it
+    // does affect the product, it's not a false positive) has no way to record that they
+    // actually reviewed it: nothing about the row would otherwise change, so there'd be
+    // nothing to save. Checking this alone, with no other change, is a valid save.
+    assessed: boolean("assessed").notNull().default(false),
+    // Two independent toggles, not a single mutually-exclusive status: a finding can be a
+    // real, non-false-positive CVE that still doesn't affect this product (e.g. an
+    // unreachable code path), which a single enum couldn't represent. Defaults are the
+    // conservative/safe assumption - a freshly-scanned, unannotated finding is presumed
+    // real and applicable (that's also the "new" state: no row here at all yet).
+    affectsProduct: boolean("affects_product").notNull().default(true),
+    falsePositive: boolean("false_positive").notNull().default(false),
+    // Not null structurally (so the column can be `not null`), but setVulnerabilityAnnotation
+    // (packages/core/src/vulnerabilities.ts) requires a non-empty rationale only when the
+    // user is asserting something other than the safe default (affectsProduct=false or
+    // falsePositive=true) - accepting the default needs no justification.
+    rationale: text("rationale").notNull().default(""),
+    // Free-form, always-optional - unlike rationale, never required regardless of the
+    // toggle values. For context that doesn't fit the "why is this not affecting us /
+    // why is this a false positive" framing rationale is for (e.g. a ticket link, a
+    // mitigation plan, who to ask).
+    notes: text("notes"),
+    annotatedBy: text("annotated_by")
+      .notNull()
+      .references(() => user.id),
+    annotatedAt: timestamp("annotated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.architectureNodeId, t.cveId] })],
 );
 
 // --- immutable, hash-chained audit log ----------------------------------------------

@@ -3076,3 +3076,436 @@ describe("e2e: architecture", () => {
     expect(rejected.error?.message).toMatch(/same product/);
   });
 });
+
+describe("e2e: NVD vulnerability scanning for OTS architecture items", () => {
+  // A real NVD API key can never legitimately equal this sentinel - it's the one and
+  // only trigger for createNvdClient's test-only fake client (see
+  // packages/integrations/nvd/src/client.ts), and only fires when
+  // ALLOW_MOCK_NVD_PROVIDER=1 is also set in the running stack's environment (see .env -
+  // dev/CI only). Lets this whole feature be exercised over real HTTP against the real
+  // DB without ever calling the real, rate-limited NVD API.
+  const MOCK_API_KEY = "mock-nvd-key";
+
+  async function saveMockConnection(tenant: TestTenant) {
+    const res = await rpc(tenant.cookie, "POST", "vulnerabilities.saveConnection", { apiKey: MOCK_API_KEY });
+    expect(res.ok).toBe(true);
+  }
+
+  async function setupOtsNode(tenant: TestTenant) {
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "OTS Product" });
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    // An OTS item can never be a tree root (only a software_item can) - parent it under
+    // one, same as a real product's OTS items always sit under some item/unit.
+    const parent = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId: product.data.id,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Host item",
+    });
+    expect(parent.ok).toBe(true);
+    const node = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId: product.data.id,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: parent.data.node.id,
+      title: "Log4j",
+      supplier: "Apache",
+      version: "2.14.1",
+    });
+    expect(node.ok).toBe(true);
+    return { productId: product.data.id as string, levelId: sw.id as string, nodeId: node.data.node.id as string };
+  }
+
+  test("no connection saved yet: getConnection reports no key and the public throttle", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const got = await rpc(tenant.cookie, "GET", "vulnerabilities.getConnection");
+    expect(got.data).toMatchObject({ hasApiKey: false });
+  });
+
+  test("saving a connection never echoes the key back, and it can be cleared explicitly", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+
+    const first = await rpc(tenant.cookie, "GET", "vulnerabilities.getConnection");
+    expect(first.data.hasApiKey).toBe(true);
+    expect(first.data.apiKey).toBeUndefined();
+
+    const cleared = await rpc(tenant.cookie, "POST", "vulnerabilities.saveConnection", { apiKey: null });
+    expect(cleared.ok).toBe(true);
+    const second = await rpc(tenant.cookie, "GET", "vulnerabilities.getConnection");
+    expect(second.data.hasApiKey).toBe(false);
+  });
+
+  test("RLS: one tenant's saved NVD connection is invisible to another tenant", async () => {
+    const tenantA = await registerTenant(`E2E Org A ${uniqueSuffix()}`);
+    const tenantB = await registerTenant(`E2E Org B ${uniqueSuffix()}`);
+    await saveMockConnection(tenantA);
+
+    const asB = await rpc(tenantB.cookie, "GET", "vulnerabilities.getConnection");
+    expect(asB.data.hasApiKey).toBe(false);
+  });
+
+  test("testConnection succeeds against the mock provider", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const result = await rpc(tenant.cookie, "POST", "vulnerabilities.testConnection");
+    expect(result.ok).toBe(true);
+    expect(result.data.ok).toBe(true);
+  });
+
+  test("scanning a non-OTS node is rejected", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    const item = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId: product.data.id,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Not OTS",
+    });
+    const scan = await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId: item.data.node.id });
+    expect(scan.ok).toBe(false);
+    expect(scan.error?.message).toMatch(/only OTS items/);
+  });
+
+  test("scan -> list -> annotate -> re-scan preserves the annotation and only new CVEs are untriaged", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const { nodeId } = await setupOtsNode(tenant);
+
+    const scan = await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    expect(scan.ok).toBe(true);
+    expect(scan.data.resultCount).toBeGreaterThan(0);
+    expect(scan.data.newFindingCount).toBe(scan.data.resultCount);
+
+    const list = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    expect(list.ok).toBe(true);
+    expect(list.data.latestScan.status).toBe("completed");
+    expect(list.data.latestScan.matchType).toBe("keyword"); // no cpe set on this node yet
+    expect(list.data.findings.length).toBeGreaterThan(0);
+    const finding = list.data.findings[0];
+    // An unannotated finding defaults to the conservative assumption: real and applicable.
+    expect(finding.isNew).toBe(true);
+    expect(finding.affectsProduct).toBe(true);
+    expect(finding.falsePositive).toBe(false);
+
+    // Confirming the default (affectsProduct=true, falsePositive=false) needs no rationale.
+    const confirmed = await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId: finding.cveId,
+      assessed: true,
+      affectsProduct: true,
+      falsePositive: false,
+      rationale: "",
+    });
+    expect(confirmed.ok).toBe(true);
+    const afterConfirm = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const confirmedFinding = afterConfirm.data.findings.find((f: any) => f.cveId === finding.cveId);
+    expect(confirmedFinding.isNew).toBe(false);
+    expect(confirmedFinding.assessed).toBe(true);
+    expect(confirmedFinding.affectsProduct).toBe(true);
+
+    // Marking as false positive without a rationale is rejected.
+    const noRationale = await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId: finding.cveId,
+      assessed: true,
+      affectsProduct: true,
+      falsePositive: true,
+      rationale: "   ",
+    });
+    expect(noRationale.ok).toBe(false);
+
+    const annotate = await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId: finding.cveId,
+      assessed: true,
+      affectsProduct: true,
+      falsePositive: true,
+      rationale: "Not reachable from any network-facing code path.",
+      notes: "Ticket TRACK-123 has the full writeup.",
+    });
+    expect(annotate.ok).toBe(true);
+
+    // Re-scan: the same CVE is reported again, but its annotation survives (no longer
+    // "new"), which is the whole point - re-scanning only needs to triage new findings.
+    const rescan = await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    expect(rescan.ok).toBe(true);
+    expect(rescan.data.newFindingCount).toBe(0);
+
+    const relisted = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const relistedFinding = relisted.data.findings.find((f: any) => f.cveId === finding.cveId);
+    expect(relistedFinding.isNew).toBe(false);
+    expect(relistedFinding.falsePositive).toBe(true);
+    expect(relistedFinding.rationale).toBe("Not reachable from any network-facing code path.");
+    expect(relistedFinding.notes).toBe("Ticket TRACK-123 has the full writeup.");
+
+    // A real vulnerability that just doesn't apply here also requires a rationale, and is
+    // independent of falsePositive - the whole reason these are two toggles, not one enum.
+    const notApplicable = await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId: finding.cveId,
+      assessed: true,
+      affectsProduct: false,
+      falsePositive: false,
+      rationale: "This code path is never invoked by our usage of the library.",
+    });
+    expect(notApplicable.ok).toBe(true);
+    const afterNotApplicable = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const notApplicableFinding = afterNotApplicable.data.findings.find((f: any) => f.cveId === finding.cveId);
+    expect(notApplicableFinding.affectsProduct).toBe(false);
+    expect(notApplicableFinding.falsePositive).toBe(false);
+  });
+
+  test("assessed and notes are independent of the affects/false-positive toggles and never require a rationale", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const { nodeId } = await setupOtsNode(tenant);
+    await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    const list = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const cveId = list.data.findings[0].cveId;
+    expect(list.data.findings[0].assessed).toBe(false);
+    expect(list.data.findings[0].notes).toBeNull();
+
+    // Ticking "assessed" with defaults otherwise unchanged and no rationale is a valid
+    // save on its own - this is the one case a plain toggle can't express (nothing else
+    // about the row changes), so there has to be a way to record "reviewed, no issue"
+    // without touching affectsProduct/falsePositive at all.
+    const assessedOnly = await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId,
+      assessed: true,
+      affectsProduct: true,
+      falsePositive: false,
+      rationale: "",
+      notes: "Looked at this during the 2026-09 review; no action needed.",
+    });
+    expect(assessedOnly.ok).toBe(true);
+
+    const relisted = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const relistedFinding = relisted.data.findings.find((f: any) => f.cveId === cveId);
+    expect(relistedFinding.assessed).toBe(true);
+    expect(relistedFinding.affectsProduct).toBe(true);
+    expect(relistedFinding.falsePositive).toBe(false);
+    expect(relistedFinding.notes).toBe("Looked at this during the 2026-09 review; no action needed.");
+
+    // Notes can be cleared back to null independently of everything else.
+    const clearedNotes = await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId,
+      assessed: true,
+      affectsProduct: true,
+      falsePositive: false,
+      rationale: "",
+      notes: "",
+    });
+    expect(clearedNotes.ok).toBe(true);
+    const afterClear = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    expect(afterClear.data.findings.find((f: any) => f.cveId === cveId).notes).toBeNull();
+  });
+
+  test("an exact CPE takes precedence over the supplier/title/version keyword fallback", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const { nodeId } = await setupOtsNode(tenant);
+
+    const recorded = await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", {
+      nodeId,
+      version: "2.14.1",
+      cpe: "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+    });
+    expect(recorded.ok).toBe(true);
+
+    const scan = await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    expect(scan.ok).toBe(true);
+    expect(scan.data.matchType).toBe("cpe");
+  });
+
+  test("architecture.get exposes version history, newest first, with the current one distinct from past ones", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { nodeId } = await setupOtsNode(tenant); // created with version 2.14.1
+
+    const bumped = await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", { nodeId, version: "2.15.1" });
+    expect(bumped.ok).toBe(true);
+
+    const detail = await rpc(tenant.cookie, "GET", "architecture.get", { id: nodeId });
+    expect(detail.ok).toBe(true);
+    expect(detail.data.node.currentVersion.version).toBe("2.15.1");
+    expect(detail.data.versionHistory.map((v: any) => v.version)).toEqual(["2.15.1", "2.14.1"]);
+    // The original version's CPE (never set) stays that way - recording a new version
+    // never mutates an earlier one.
+    expect(detail.data.versionHistory[1].cpe).toBeNull();
+  });
+
+  test("editing supplier alone leaves version history untouched", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { nodeId } = await setupOtsNode(tenant);
+
+    const updated = await rpc(tenant.cookie, "POST", "architecture.update", {
+      id: nodeId,
+      title: "Log4j",
+      supplier: "Apache Software Foundation",
+    });
+    expect(updated.ok).toBe(true);
+
+    const detail = await rpc(tenant.cookie, "GET", "architecture.get", { id: nodeId });
+    expect(detail.data.node.supplier).toBe("Apache Software Foundation");
+    expect(detail.data.node.currentVersion.version).toBe("2.14.1");
+    expect(detail.data.versionHistory.length).toBe(1);
+  });
+
+  test("recording a version on a non-OTS node is rejected", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    const item = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId: product.data.id,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Not OTS",
+    });
+    const record = await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", {
+      nodeId: item.data.node.id,
+      version: "1.0",
+    });
+    expect(record.ok).toBe(false);
+    expect(record.error?.message).toMatch(/only OTS items/);
+  });
+
+  test("bumping the version marks existing findings as not confirmed until re-scanned, but keeps their annotation", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const { nodeId } = await setupOtsNode(tenant);
+
+    const scan1 = await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    expect(scan1.ok).toBe(true);
+    const beforeBump = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const cveId = beforeBump.data.findings[0].cveId;
+    expect(beforeBump.data.findings[0].confirmedUnderCurrentVersion).toBe(true);
+
+    await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId,
+      assessed: true,
+      affectsProduct: true,
+      falsePositive: true,
+      rationale: "Known false positive for this component.",
+    });
+
+    const bump = await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", { nodeId, version: "2.15.1" });
+    expect(bump.ok).toBe(true);
+
+    // Not re-scanned yet under 2.15.1 - the finding confirmed under 2.14.1 is now stale,
+    // but its annotation (set before the bump) is untouched.
+    const afterBump = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const findingAfterBump = afterBump.data.findings.find((f: any) => f.cveId === cveId);
+    expect(findingAfterBump.confirmedUnderCurrentVersion).toBe(false);
+    expect(findingAfterBump.falsePositive).toBe(true);
+    expect(findingAfterBump.rationale).toBe("Known false positive for this component.");
+
+    // Re-scanning under the new version re-confirms it.
+    const scan2 = await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    expect(scan2.ok).toBe(true);
+    const afterRescan = await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    const findingAfterRescan = afterRescan.data.findings.find((f: any) => f.cveId === cveId);
+    expect(findingAfterRescan.confirmedUnderCurrentVersion).toBe(true);
+  });
+
+  test("RLS: findings and annotations from one tenant are invisible to another", async () => {
+    const tenantA = await registerTenant(`E2E Org A ${uniqueSuffix()}`);
+    const tenantB = await registerTenant(`E2E Org B ${uniqueSuffix()}`);
+    await saveMockConnection(tenantA);
+    const { nodeId } = await setupOtsNode(tenantA);
+    await rpc(tenantA.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+
+    const asB = await rpc(tenantB.cookie, "GET", "vulnerabilities.listForNode", { nodeId });
+    // Cross-tenant node id doesn't resolve for tenant B (RLS-scoped node lookup fails).
+    expect(asB.ok).toBe(false);
+  });
+
+  test("the CPE search helper returns candidates through the mock provider", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const result = await rpc(tenant.cookie, "POST", "vulnerabilities.searchCpe", { keyword: "Apache Log4j" });
+    expect(result.ok).toBe(true);
+    expect(result.data.length).toBeGreaterThan(0);
+    expect(result.data[0].cpeName).toContain("cpe:2.3:");
+  });
+
+  test("otsSummary reports per-version finding counts by triage status", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const { productId, levelId, nodeId } = await setupOtsNode(tenant);
+
+    const beforeScan = await rpc(tenant.cookie, "GET", "vulnerabilities.otsSummary", { productId, levelId });
+    expect(beforeScan.ok).toBe(true);
+    const rowBefore = beforeScan.data.find((r: any) => r.node.id === nodeId);
+    // setupOtsNode already records an initial version (2.14.1) - exactly one version on
+    // record, current, with nothing scanned under it yet.
+    expect(rowBefore.versions).toHaveLength(1);
+    expect(rowBefore.versions[0].isCurrent).toBe(true);
+    expect(rowBefore.versions[0].counts).toEqual({ total: 0, new: 0, confirmed: 0, notApplicable: 0, falsePositive: 0 });
+    expect(rowBefore.versions[0].latestScan).toBeNull();
+
+    await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    const afterScan = await rpc(tenant.cookie, "GET", "vulnerabilities.otsSummary", { productId, levelId });
+    const versionAfterScan = afterScan.data.find((r: any) => r.node.id === nodeId).versions[0];
+    expect(versionAfterScan.counts.total).toBeGreaterThan(0);
+    expect(versionAfterScan.counts.new).toBe(versionAfterScan.counts.total);
+    expect(versionAfterScan.latestScan.status).toBe("completed");
+
+    const firstCveId = (await rpc(tenant.cookie, "GET", "vulnerabilities.listForNode", { nodeId })).data.findings[0]
+      .cveId;
+    await rpc(tenant.cookie, "POST", "vulnerabilities.annotate", {
+      nodeId,
+      cveId: firstCveId,
+      assessed: true,
+      affectsProduct: false,
+      falsePositive: false,
+      rationale: "Never invoked by this product.",
+    });
+    const afterAnnotate = await rpc(tenant.cookie, "GET", "vulnerabilities.otsSummary", { productId, levelId });
+    const versionAfterAnnotate = afterAnnotate.data.find((r: any) => r.node.id === nodeId).versions[0];
+    expect(versionAfterAnnotate.counts.notApplicable).toBe(1);
+    expect(versionAfterAnnotate.counts.new).toBe(versionAfterScan.counts.total - 1);
+  });
+
+  test("otsSummary carries full version history, attributing counts to whichever version last confirmed each finding", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockConnection(tenant);
+    const { productId, levelId, nodeId } = await setupOtsNode(tenant); // version 2.14.1
+
+    await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", { nodeId, version: "2.15.1" });
+    // Deliberately not re-scanned under 2.15.1 yet.
+
+    const summary = await rpc(tenant.cookie, "GET", "vulnerabilities.otsSummary", { productId, levelId });
+    expect(summary.ok).toBe(true);
+    const row = summary.data.find((r: any) => r.node.id === nodeId);
+    expect(row.versions).toHaveLength(2);
+    expect(row.versions.map((v: any) => v.version)).toEqual(["2.15.1", "2.14.1"]); // newest first
+
+    const current = row.versions.find((v: any) => v.version === "2.15.1");
+    const previous = row.versions.find((v: any) => v.version === "2.14.1");
+    expect(current.isCurrent).toBe(true);
+    expect(current.counts.total).toBe(0); // never scanned under 2.15.1
+    expect(current.latestScan).toBeNull();
+    expect(previous.isCurrent).toBe(false);
+    expect(previous.counts.total).toBeGreaterThan(0); // the scan that ran under 2.14.1
+    expect(previous.latestScan.status).toBe("completed");
+
+    // Re-scanning under 2.15.1 moves the finding's count over to the new version and
+    // leaves the old version showing nothing outstanding.
+    await rpc(tenant.cookie, "POST", "vulnerabilities.scanNode", { nodeId });
+    const afterRescan = await rpc(tenant.cookie, "GET", "vulnerabilities.otsSummary", { productId, levelId });
+    const rowAfter = afterRescan.data.find((r: any) => r.node.id === nodeId);
+    const currentAfter = rowAfter.versions.find((v: any) => v.version === "2.15.1");
+    const previousAfter = rowAfter.versions.find((v: any) => v.version === "2.14.1");
+    expect(currentAfter.counts.total).toBeGreaterThan(0);
+    expect(previousAfter.counts.total).toBe(0);
+  });
+});

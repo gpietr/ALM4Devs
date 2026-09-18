@@ -79,6 +79,11 @@ const SECTIONS: ReadonlyArray<{
         title: "Import",
         description: "One-time import of requirements and test cases from Spira.",
       },
+      {
+        href: "/settings/nvd",
+        title: "NVD connection",
+        description: "Optional API key to speed up OTS vulnerability scans.",
+      },
     ],
   },
 ];
