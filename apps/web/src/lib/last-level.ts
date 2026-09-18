@@ -2,7 +2,7 @@
 
 const KEY = "alm4devs:lastLevelByArtifact";
 
-type Artifact = "requirements" | "testCases";
+type Artifact = "requirements" | "architecture" | "testCases";
 
 /**
  * Remembers the last level viewed within each (product, artifact) pair, so switching tabs

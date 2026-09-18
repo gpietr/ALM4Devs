@@ -108,12 +108,13 @@ function initialsFor(name?: string, email?: string): string {
   return (email?.[0] ?? "?").toUpperCase();
 }
 
-type Artifact = "requirements" | "testCases" | "traceability";
+type Artifact = "requirements" | "architecture" | "testCases" | "traceability";
 
 const ARTIFACT_TABS: ReadonlyArray<{ key: Artifact; label: string }> = [
   { key: "requirements", label: "Requirements" },
   { key: "testCases", label: "Test cases" },
   { key: "traceability", label: "Traceability" },
+  { key: "architecture", label: "Architecture" },
 ];
 
 /** Both rows for a page scoped to one product: row 1 adds the product switcher (a
@@ -132,10 +133,18 @@ export function ProductContextStrip({
 }) {
   const products = trpc.products.list.useQuery();
   const requirementLevels = trpc.requirements.listLevels.useQuery();
+  const architectureLevels = trpc.architecture.listLevels.useQuery();
   const testLevels = trpc.testCases.listLevels.useQuery();
 
   const productName = products.data?.find((p) => p.id === productId)?.name ?? "Product";
-  const levels = artifact === "requirements" ? requirementLevels.data : artifact === "testCases" ? testLevels.data : null;
+  const levels =
+    artifact === "requirements"
+      ? requirementLevels.data
+      : artifact === "architecture"
+        ? architectureLevels.data
+        : artifact === "testCases"
+          ? testLevels.data
+          : null;
 
   return (
     <TopBar

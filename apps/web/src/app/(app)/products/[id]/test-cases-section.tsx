@@ -19,9 +19,10 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 const BUILTIN_COLUMNS: ListColumn[] = [
-  { id: "id", label: "ID" },
+  { id: "id", label: "ID", required: true },
   { id: "title", label: "Test case" },
   { id: "covers", label: "Covers" },
+  { id: "architecture", label: "Software items", defaultVisible: false },
   { id: "created", label: "Created" },
 ];
 
@@ -204,6 +205,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                 {visible.has("covers") && (
                   <SortableTableHead label="Covers" sortKey="covers" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[130px]" />
                 )}
+                {visible.has("architecture") && <TableHead className="w-[160px]">Architecture</TableHead>}
                 {visible.has("created") && (
                   <SortableTableHead label="Created" sortKey="created" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[110px]" />
                 )}
@@ -254,6 +256,11 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
+                    </TableCell>
+                  )}
+                  {visible.has("architecture") && (
+                    <TableCell className="max-w-[160px] truncate font-mono text-[12.5px] text-muted-foreground">
+                      {tc.architectureLinks.length > 0 ? tc.architectureLinks.join(", ") : "—"}
                     </TableCell>
                   )}
                   {visible.has("created") && (

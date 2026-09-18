@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { ensureDefaultArchitectureLevels } from "@galm/core";
 import { schema, withTenant } from "@galm/db";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -25,12 +26,17 @@ export const productsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
-      const [product] = await withTenant(db, tenantId, (tx) =>
-        tx
+      const product = await withTenant(db, tenantId, async (tx) => {
+        const [created] = await tx
           .insert(schema.products)
           .values({ tenantId, name: input.name, description: input.description ?? null })
-          .returning(),
-      );
+          .returning();
+        // Test cases are immediately usable on a new product because register seeds
+        // "Default". Architecture is the same: SYSARCH/SWARCH must exist before the
+        // Architecture tab opens, including for tenants that predate the module.
+        await ensureDefaultArchitectureLevels(tx, tenantId);
+        return created;
+      });
       return product;
     }),
 });

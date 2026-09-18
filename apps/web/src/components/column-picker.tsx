@@ -35,16 +35,20 @@ export function ColumnPicker({
         <p className="px-1 pb-1.5 text-xs font-medium text-muted-foreground">Columns</p>
         <div className="space-y-0.5">
           {columns.map((c) => {
-            const checked = selectedIds.includes(c.id);
+            const checked = c.required || selectedIds.includes(c.id);
             return (
               <label
                 key={c.id}
-                className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-muted"
+                className={`flex items-center gap-2 rounded px-1.5 py-1 text-sm ${
+                  c.required ? "text-muted-foreground" : "cursor-pointer hover:bg-muted"
+                }`}
+                title={c.required ? "Always shown" : undefined}
               >
                 <input
                   type="checkbox"
                   checked={checked}
-                  onChange={() => onChange(toggleColumnId(selectedIds, c.id))}
+                  disabled={c.required}
+                  onChange={() => onChange(toggleColumnId(selectedIds, c.id, columns))}
                   className="size-3.5"
                 />
                 {c.label}

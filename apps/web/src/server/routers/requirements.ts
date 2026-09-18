@@ -11,9 +11,12 @@ import {
   getCustomFieldValues,
   getCustomFieldValuesForEntities,
   getLevel,
+  listArchitectureDisplayIdsByRequirement,
+  listArchitectureLinksForRequirement,
   listEnabledStatuses,
   listLevels,
   nextAllowedCategories,
+  replaceRequirementArchitectureLinks,
   REQUIREMENT_STATUS_CATEGORIES,
   type RequirementStatusCategory,
   setCustomFieldValues,
@@ -194,11 +197,13 @@ export const requirementsRouter = router({
         // For the list table's configurable columns (see the column picker on
         // the product page) - one batched query for every row rather than N+1.
         const customFieldsByRequirement = await getCustomFieldValuesForEntities(tx, tenantId, "requirement", ids);
+        const architectureByRequirement = await listArchitectureDisplayIdsByRequirement(tx, tenantId, ids);
 
         return rows.map((r) => ({
           ...r,
           levelCode: level.code,
           coveredByCount: coveredByCount.get(r.id) ?? 0,
+          architectureLinks: architectureByRequirement.get(r.id) ?? [],
           customFieldValues: customFieldsByRequirement.get(r.id) ?? [],
         }));
       });
@@ -270,9 +275,10 @@ export const requirementsRouter = router({
       // to" (getEffectiveRequirementLinks): direct case-level links, or any of their
       // steps'.
       const coveringTestCases = await getCoveringTestCases(tx, tenantId, input.id);
+      const architectureLinks = await listArchitectureLinksForRequirement(tx, tenantId, input.id);
       const customFieldValues = await getCustomFieldValues(tx, tenantId, "requirement", input.id);
 
-      return { requirement, versions, children, coveringTestCases, customFieldValues };
+      return { requirement, versions, children, coveringTestCases, architectureLinks, customFieldValues };
     });
   }),
 
@@ -357,6 +363,33 @@ export const requirementsRouter = router({
           customFieldValues: input.customFieldValues as CustomFieldValueInput[] | undefined,
         }),
       ).catch(toBadRequest);
+    }),
+
+  /** Architecture links aren't versioned (same spirit as test-case requirement links),
+   * so they have their own mutation rather than riding on editDraft. */
+  setArchitectureLinks: protectedProcedure
+    .input(
+      z.object({
+        requirementId: z.string().uuid(),
+        architectureNodeIds: z.array(z.string().uuid()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, async (tx) => {
+        const [owned] = await tx
+          .select({ id: schema.requirements.id, productId: schema.requirements.productId })
+          .from(schema.requirements)
+          .where(and(eq(schema.requirements.id, input.requirementId), eq(schema.requirements.tenantId, tenantId)));
+        if (!owned) throw new DomainError("requirement not found");
+        await replaceRequirementArchitectureLinks(tx, {
+          tenantId,
+          requirementId: input.requirementId,
+          productId: owned.productId,
+          architectureNodeIds: input.architectureNodeIds,
+        });
+        return { ok: true };
+      }).catch(toBadRequest);
     }),
 
   /** Custom field values aren't stored on requirement_versions, but the UI saves them

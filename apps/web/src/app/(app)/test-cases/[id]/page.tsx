@@ -12,6 +12,7 @@ import {
 import { BulkGenerateDocumentButton } from "@/components/bulk-generate-document-button";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
 import { ContextRail } from "@/components/context-rail";
+import { ArchitecturePicker } from "@/components/architecture-picker";
 import { RequirementPicker } from "@/components/requirement-picker";
 import { emptyStep, type StepDraft, TestStepsEditor } from "@/components/test-steps-editor";
 import { Button } from "@/components/ui/button";
@@ -32,10 +33,17 @@ import { use, useEffect, useRef, useState } from "react";
  * order-independent comparison for something that in practice never happens on its own.
  * Custom field values are part of this same form/Save now (see updateTestCase.mutate
  * below), so they're part of the same dirty check too. */
-function snapshotOf(title: string, requirementIds: string[], steps: StepDraft[], customFieldState: CustomFieldFormState): string {
+function snapshotOf(
+  title: string,
+  requirementIds: string[],
+  architectureNodeIds: string[],
+  steps: StepDraft[],
+  customFieldState: CustomFieldFormState,
+): string {
   return JSON.stringify({
     title,
     requirementIds,
+    architectureNodeIds,
     steps: steps.map((s) => ({
       id: s.id ?? null,
       description: s.description,
@@ -57,6 +65,10 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     { productId: detail.data?.testCase.productId ?? "" },
     { enabled: !!detail.data },
   );
+  const architectureOptions = trpc.architecture.listAllByProduct.useQuery(
+    { productId: detail.data?.testCase.productId ?? "" },
+    { enabled: !!detail.data },
+  );
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_case" });
   const customFieldDefs = asCustomFieldDefinitions(customFieldsQuery.data ?? []);
   const updateTestCase = trpc.testCases.update.useMutation({
@@ -73,6 +85,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       utils.testCases.get.invalidate({ id });
       const newTitle = result.testCase.title;
       const newRequirementIds = variables.requirementIds ?? [];
+      const newArchitectureNodeIds = variables.architectureNodeIds ?? [];
       const newSteps = result.steps.map((s, i) => ({
         id: s.id,
         key: s.id,
@@ -93,15 +106,17 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       );
       setTitle(newTitle);
       setRequirementIds(newRequirementIds);
+      setArchitectureNodeIds(newArchitectureNodeIds);
       setSteps(newSteps);
       setCustomFieldState(newCustomFieldState);
-      setSavedSnapshot(snapshotOf(newTitle, newRequirementIds, newSteps, newCustomFieldState));
+      setSavedSnapshot(snapshotOf(newTitle, newRequirementIds, newArchitectureNodeIds, newSteps, newCustomFieldState));
     },
   });
   const deleteTestCase = trpc.testCases.delete.useMutation();
 
   const [title, setTitle] = useState("");
   const [requirementIds, setRequirementIds] = useState<string[]>([]);
+  const [architectureNodeIds, setArchitectureNodeIds] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepDraft[]>([emptyStep()]);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
@@ -123,6 +138,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       requirementLinks: { id: string }[];
     }>,
     directIds: string[],
+    architectureIds: string[],
     customFieldValues: CustomFieldValueView[],
   ) {
     const newSteps = srvSteps.map((s) => ({
@@ -136,21 +152,30 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     const newCustomFieldState = customFieldFormStateFromValues(customFieldValues);
     setTitle(tc.title);
     setRequirementIds(directIds);
+    setArchitectureNodeIds(architectureIds);
     setSteps(newSteps);
     setCustomFieldState(newCustomFieldState);
-    setSavedSnapshot(snapshotOf(tc.title, directIds, newSteps, newCustomFieldState));
+    setSavedSnapshot(snapshotOf(tc.title, directIds, architectureIds, newSteps, newCustomFieldState));
   }
   useEffect(() => {
     if (hasInitializedRef.current || !detail.data) return;
     hasInitializedRef.current = true;
-    syncFromServer(detail.data.testCase, detail.data.steps, detail.data.directRequirementIds, detail.data.customFieldValues);
+    syncFromServer(
+      detail.data.testCase,
+      detail.data.steps,
+      detail.data.directRequirementIds,
+      detail.data.architectureLinks.map((l) => l.id),
+      detail.data.customFieldValues,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data]);
 
   // `savedSnapshot` is null until the first sync, so this stays false rather than flashing
   // "dirty" against the empty initial state on every load. Computed above the loading/error
   // returns below since hooks (including the guard it feeds) must run unconditionally.
-  const isDirty = savedSnapshot !== null && snapshotOf(title, requirementIds, steps, customFieldState) !== savedSnapshot;
+  const isDirty =
+    savedSnapshot !== null &&
+    snapshotOf(title, requirementIds, architectureNodeIds, steps, customFieldState) !== savedSnapshot;
   useUnsavedChangesGuard(isDirty, "You have unsaved changes on this test case. Leave without saving?");
 
   function save() {
@@ -158,6 +183,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       testCaseId: id,
       title,
       requirementIds: requirementIds.length ? requirementIds : undefined,
+      architectureNodeIds,
       steps: steps.map((s) => ({
         id: s.id,
         description: s.description,
@@ -181,7 +207,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirty, updateTestCase.isPending, title, requirementIds, steps, customFieldState]);
+  }, [isDirty, updateTestCase.isPending, title, requirementIds, architectureNodeIds, steps, customFieldState]);
 
   if (detail.isLoading) return <p className="p-10 text-[13.5px] text-muted-foreground">Loading...</p>;
   if (detail.error || !detail.data) {
@@ -193,7 +219,13 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
   const displayId = formatItemId(testCase.levelCode, testCase.sequenceNumber);
 
   function discardChanges() {
-    syncFromServer(testCase, detail.data!.steps, detail.data!.directRequirementIds, detail.data!.customFieldValues);
+    syncFromServer(
+      testCase,
+      detail.data!.steps,
+      detail.data!.directRequirementIds,
+      detail.data!.architectureLinks.map((l) => l.id),
+      detail.data!.customFieldValues,
+    );
   }
 
   return (
@@ -276,6 +308,15 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
               Linked requirements (applies to the whole test case, independent of any step link)
             </span>
             <RequirementPicker options={requirementOptions.data ?? []} value={requirementIds} onChange={setRequirementIds} />
+          </Label>
+
+          <Label className="flex-col items-start gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Linked architecture</span>
+            <ArchitecturePicker
+              options={architectureOptions.data ?? []}
+              value={architectureNodeIds}
+              onChange={setArchitectureNodeIds}
+            />
           </Label>
 
           <div>

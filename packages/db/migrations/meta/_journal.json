@@ -113,6 +113,27 @@
       "when": 1789545819557,
       "tag": "0015_tired_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789631442532,
+      "tag": "0016_architecture_nodes",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789658997914,
+      "tag": "0018_architecture_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789707403175,
+      "tag": "0019_architecture_nodes_parent_id_index",
+      "breakpoints": true
     }
   ]
 }

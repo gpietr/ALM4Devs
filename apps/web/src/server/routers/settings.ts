@@ -1,10 +1,12 @@
 import { db } from "@/lib/db";
 import {
+  createArchitectureLevel,
   createCustomFieldDefinition,
   createCustomFieldListOption,
   createEnvironment,
   createLevel,
   createTestLevel,
+  deleteArchitectureLevel,
   type CustomFieldEntityType,
   CUSTOM_FIELD_TYPES,
   type CustomFieldType,
@@ -15,16 +17,19 @@ import {
   deleteTestLevel,
   getTenantSettings,
   listAllStatuses,
+  listArchitectureLevels,
   listCustomFieldDefinitions,
   listEnvironments,
   listLevels,
   listTestLevels,
+  renameArchitectureLevel,
   renameCustomFieldDefinition,
   renameCustomFieldListOption,
   renameEnvironment,
   renameLevel,
   renameStatus,
   renameTestLevel,
+  reorderArchitectureLevel,
   reorderCustomFieldDefinition,
   reorderCustomFieldListOption,
   reorderEnvironment,
@@ -33,6 +38,7 @@ import {
   reorderTestLevel,
   setCustomFieldRequired,
   setStatusEnabled,
+  updateArchitectureLevelCode,
   updateLevelCode,
   updateTenantSettings,
   updateTestLevelCode,
@@ -57,14 +63,15 @@ export const settingsRouter = router({
   get: protectedProcedure.query(async ({ ctx }) => {
     const tenantId = tenantOf(ctx);
     return withTenant(db, tenantId, async (tx) => {
-      const [approval, statuses, levels, testLevels, environments] = await Promise.all([
+      const [approval, statuses, levels, testLevels, architectureLevels, environments] = await Promise.all([
         getTenantSettings(tx, tenantId),
         listAllStatuses(tx, tenantId),
         listLevels(tx, tenantId),
         listTestLevels(tx, tenantId),
+        listArchitectureLevels(tx, tenantId),
         listEnvironments(tx, tenantId),
       ]);
-      return { approval, statuses, levels, testLevels, environments };
+      return { approval, statuses, levels, testLevels, architectureLevels, environments };
     });
   }),
 
@@ -194,6 +201,52 @@ export const settingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
       await withTenant(db, tenantId, (tx) => deleteTestLevel(tx, tenantId, input.levelId)).catch(toBadRequest);
+      return { ok: true };
+    }),
+
+  createArchitectureLevel: protectedProcedure
+    .input(z.object({ name: z.string().trim().min(1).max(100), code: z.string().trim().min(1).max(20) }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, (tx) => createArchitectureLevel(tx, tenantId, input.name, input.code)).catch(
+        toBadRequest,
+      );
+    }),
+
+  renameArchitectureLevel: protectedProcedure
+    .input(z.object({ levelId: z.string().uuid(), name: z.string().trim().min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, (tx) =>
+        renameArchitectureLevel(tx, tenantId, input.levelId, input.name),
+      ).catch(toBadRequest);
+    }),
+
+  updateArchitectureLevelCode: protectedProcedure
+    .input(z.object({ levelId: z.string().uuid(), code: z.string().trim().min(1).max(20) }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, (tx) =>
+        updateArchitectureLevelCode(tx, tenantId, input.levelId, input.code),
+      ).catch(toBadRequest);
+    }),
+
+  reorderArchitectureLevel: protectedProcedure
+    .input(z.object({ levelId: z.string().uuid(), direction: z.enum(["up", "down"]) }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, (tx) =>
+        reorderArchitectureLevel(tx, tenantId, input.levelId, input.direction),
+      ).catch(toBadRequest);
+    }),
+
+  deleteArchitectureLevel: protectedProcedure
+    .input(z.object({ levelId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      await withTenant(db, tenantId, (tx) => deleteArchitectureLevel(tx, tenantId, input.levelId)).catch(
+        toBadRequest,
+      );
       return { ok: true };
     }),
 

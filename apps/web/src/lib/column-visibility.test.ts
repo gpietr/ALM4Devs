@@ -15,6 +15,11 @@ const columns: ListColumn[] = [
   { id: "cf-2", label: "Safety Classification" },
 ];
 
+const requiredColumns: ListColumn[] = [
+  { id: "id", label: "ID", required: true },
+  { id: "title", label: "Requirement" },
+];
+
 describe("parseColumnParam", () => {
   test("absent param uses each column's defaultVisible", () => {
     expect(parseColumnParam(null, columns)).toEqual(["id", "title", "status", "cf-2"]);
@@ -45,7 +50,30 @@ describe("serializeColumnParam", () => {
 
 describe("toggleColumnId", () => {
   test("adds a missing id and removes a present one without reordering the rest", () => {
-    expect(toggleColumnId(["id", "title"], "status")).toEqual(["id", "title", "status"]);
-    expect(toggleColumnId(["id", "title", "status"], "title")).toEqual(["id", "status"]);
+    expect(toggleColumnId(["id", "title"], "status", columns)).toEqual(["id", "title", "status"]);
+    expect(toggleColumnId(["id", "title", "status"], "title", columns)).toEqual(["id", "status"]);
+  });
+
+  test("refuses to remove a required column", () => {
+    expect(toggleColumnId(["id", "title"], "id", requiredColumns)).toEqual(["id", "title"]);
+  });
+});
+
+describe("required columns", () => {
+  test("defaultVisibleIds always includes a required column even if defaultVisible is false", () => {
+    expect(defaultVisibleIds(requiredColumns)).toEqual(["id", "title"]);
+  });
+
+  test("none still returns the required columns rather than an empty set", () => {
+    expect(parseColumnParam("none", requiredColumns)).toEqual(["id"]);
+  });
+
+  test("an explicit list missing the required column has it added back", () => {
+    expect(parseColumnParam("title", requiredColumns)).toEqual(["title", "id"]);
+  });
+
+  test("serializing down to just the required columns round-trips through none", () => {
+    expect(serializeColumnParam(["id"], requiredColumns)).toBe("none");
+    expect(parseColumnParam(serializeColumnParam(["id"], requiredColumns) ?? null, requiredColumns)).toEqual(["id"]);
   });
 });

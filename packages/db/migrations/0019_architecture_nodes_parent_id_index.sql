@@ -1,0 +1,1 @@
+CREATE INDEX "architecture_nodes_parent_id_idx" ON "architecture_nodes" USING btree ("parent_id");

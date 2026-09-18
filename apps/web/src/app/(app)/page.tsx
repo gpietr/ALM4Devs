@@ -4,16 +4,19 @@ import { LastLocationRedirect } from "@/components/last-location-redirect";
 import { buttonVariants } from "@/components/ui/button";
 import Link from "next/link";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
-// No session redirect here - the (app) layout already gates every page in this group.
-// This fetch is purely for the email/org-id line below, not access control.
+// Layout already gates the (app) group, but this page also reads the session for the
+// email/org line below - defend against a null session (e.g. DB blip between layout and
+// page) so we redirect instead of throwing on `.user`.
 //
 // LastLocationRedirect (a client component) sends a returning user straight back to the
 // product/artifact/level they were last looking at, if any is remembered - this page's own
 // content below only ever shows on a first visit, or if nothing's remembered.
 export default async function HomePage() {
   const session = await auth.api.getSession({ headers: await headers() });
-  const user = session!.user as { email: string; tenantId?: string };
+  if (!session) redirect("/log-in");
+  const user = session.user as { email: string; tenantId?: string };
 
   return (
     <>

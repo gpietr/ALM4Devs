@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -118,11 +119,10 @@ export const products = pgTable("products", {
 });
 
 // Backs the sequential, per-(product, level) human-readable ids shown everywhere a
-// requirement or test case appears (SYSREQ-1, SYSREQ-2, ...) - one row per (product,
-// level) pair, holding the last number handed out. Shared by both requirement levels and
-// test levels, which are the same physical `levels` table below (see its docstring), so
-// `levelId` is a real foreign key rather than a bare uuid the two source tables merely
-// happened not to collide on. Scoped per product rather than tenant-wide so two unrelated
+// requirement, test case, or architecture node appears (SYSREQ-1, SYSARCH-1, ...) - one
+// row per (product, level) pair, holding the last number handed out. Shared by every
+// kind on the `levels` table below (see its docstring), so `levelId` is a real foreign
+// key rather than a bare uuid the source tables merely happened not to collide on. Scoped per product rather than tenant-wide so two unrelated
 // products under one tenant each get their own SYSREQ-1, matching how every other
 // requirement/test-case list is already scoped to one product at a time. See
 // packages/core's nextSequenceNumber - always incremented via a single atomic
@@ -176,28 +176,33 @@ export const tenantSettings = pgTable("tenant_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-// One tenant-owned table backs BOTH requirement hierarchy levels (User Need / System
-// Requirement / Software Item Spec by default) and test-case levels (Default, by default)
-// - `kind` (CHECK-constrained to 'requirement' | 'test', see manual migration; see
-// packages/core's LevelKind) is the only thing that distinguishes them. These started as
-// two near-identical tables (requirement_levels/test_levels) and were merged: splitting
-// them bought nothing (identical shape, identical CRUD - see packages/core/src/levels.ts)
-// while costing two real things. First, level_sequence_counters.levelId above couldn't be
-// a genuine foreign key - it had to be a bare uuid pointing at whichever of the two tables
-// actually owned the id, with nothing in the schema saying which. Second, each kind had
-// its own `(tenant_id, code)` uniqueness domain, so a requirement level and a test level
-// could silently pick the same code and produce an ambiguous human-readable id (a "TC-1"
-// that could mean either a requirement or a test case). One table means one uniqueness
-// domain: a code is unique across a tenant's entire id-prefix namespace, period.
+// One tenant-owned table backs requirement hierarchy levels (User Need / System
+// Requirement / Software Item Spec by default), test-case levels (Default, by default),
+// and architecture levels (System Architecture / Software Architecture by default) -
+// `kind` (CHECK-constrained to 'requirement' | 'test' | 'architecture', see manual
+// migration; see packages/core's LevelKind) is the only thing that distinguishes them.
+// These started as two near-identical tables (requirement_levels/test_levels) and were
+// merged: splitting them bought nothing (identical shape, identical CRUD - see
+// packages/core/src/levels.ts) while costing two real things. First,
+// level_sequence_counters.levelId above couldn't be a genuine foreign key - it had to be
+// a bare uuid pointing at whichever of the two tables actually owned the id, with nothing
+// in the schema saying which. Second, each kind had its own `(tenant_id, code)` uniqueness
+// domain, so a requirement level and a test level could silently pick the same code and
+// produce an ambiguous human-readable id (a "TC-1" that could mean either a requirement
+// or a test case). One table means one uniqueness domain: a code is unique across a
+// tenant's entire id-prefix namespace, period. Architecture levels join the same table
+// for the same two reasons.
 //
 // sortOrder means something only for kind='requirement': it's the hierarchy itself - a
 // lower sortOrder is "more abstract"/higher up, and a requirement's optional parent must
 // be at a strictly lower sortOrder than its own level (see packages/core's
-// createRequirement). For kind='test' it's just display order; test levels have no
-// hierarchy behavior. Neither kind has a fixed "category" the code needs to know special
-// behavior for (unlike requirement_statuses), so there's nothing to enable/disable - just
-// create, rename, reorder, or delete (delete is refused while any requirement/test case
-// still uses that level, or if it's the tenant's last remaining level of that kind).
+// createRequirement). For kind='test' and kind='architecture' it's just display order;
+// architecture trees are independent per level (a node cannot parent across levels), not
+// stacked by sortOrder the way requirements are. No kind has a fixed "category" the code
+// needs to know special behavior for (unlike requirement_statuses), so there's nothing
+// to enable/disable - just create, rename, reorder, or delete (delete is refused while
+// any requirement/test case/architecture node still uses that level, or if it's the
+// tenant's last remaining level of that kind).
 export const levels = pgTable(
   "levels",
   {
@@ -209,7 +214,7 @@ export const levels = pgTable(
     name: text("name").notNull(),
     // The prefix for this level's human-readable sequential IDs (e.g. "SYSREQ" ->
     // SYSREQ-1, SYSREQ-2, ...) - user-editable in Settings, but ONLY while no
-    // requirement/test case has been created under this level yet (see
+    // requirement/test case/architecture node has been created under this level yet (see
     // packages/core/src/levels.ts's updateLevelCodeOfKind) - once an id has actually been
     // assigned, and potentially exported, signed, or cross-referenced, its prefix is
     // frozen so that id never silently starts meaning something else. Before that point,
@@ -724,6 +729,93 @@ export const documentTemplateParameters = pgTable(
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [unique().on(t.templateId, t.key)],
+);
+
+// Product-scoped software architecture tree (IEC 62304-shaped decomposition): software
+// items may nest and contain units/OTS; units may contain OTS only ("this unit uses that
+// library"); OTS items are always leaves. Each (product, architecture-level) is its own
+// tree - parents cannot cross levels. Display ids reuse the shared levels/sequence-
+// counters machinery (SYSARCH-1, SWARCH-1, or a tenant's own code). No versioning - same
+// spirit as test cases.
+//
+// Links to requirements / test cases: see architecture_node_*_links below (many-to-many;
+// any node kind may link). Not in this table yet (deliberate cuts):
+// - SBOM / vulnerability records (will hang off OTS supplier+version)
+// - Detailed design records on units
+export const architectureNodes = pgTable(
+  "architecture_nodes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    levelId: uuid("level_id")
+      .notNull()
+      .references(() => levels.id),
+    // CHECK-constrained (manual migration) to 'software_item' | 'software_unit' | 'ots'.
+    kind: text("kind").notNull(),
+    parentId: uuid("parent_id").references((): AnyPgColumn => architectureNodes.id, {
+      onDelete: "restrict",
+    }),
+    sequenceNumber: integer("sequence_number").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    // OTS identity only - unused (null) on items and units. Not an SBOM yet.
+    supplier: text("supplier"),
+    version: text("version"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique().on(t.productId, t.levelId, t.sequenceNumber),
+    // deleteArchitectureNode (packages/core/src/architecture.ts) checks child count by
+    // parentId on every delete, and the tree/nest queries group children by parentId per
+    // level - both scan this table by parentId on a hot path, so unlike most FKs in this
+    // schema it's worth indexing explicitly rather than relying on a sequential scan.
+    index("architecture_nodes_parent_id_idx").on(t.parentId),
+  ],
+);
+
+// Many-to-many: architecture nodes (item/unit/OTS) ↔ requirements. Same product is
+// enforced in packages/core (not a DB constraint - requirements and nodes share tenant
+// via RLS, but product alignment is an application rule). Same shape as
+// test_case_requirement_links: composite PK, tenant_id for RLS, cascade on both ends.
+export const architectureNodeRequirementLinks = pgTable(
+  "architecture_node_requirement_links",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    architectureNodeId: uuid("architecture_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+    requirementId: uuid("requirement_id")
+      .notNull()
+      .references(() => requirements.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.architectureNodeId, t.requirementId] })],
+);
+
+export const architectureNodeTestCaseLinks = pgTable(
+  "architecture_node_test_case_links",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    architectureNodeId: uuid("architecture_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+    testCaseId: uuid("test_case_id")
+      .notNull()
+      .references(() => testCases.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.architectureNodeId, t.testCaseId] })],
 );
 
 // --- immutable, hash-chained audit log ----------------------------------------------

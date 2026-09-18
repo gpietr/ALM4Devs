@@ -8,7 +8,7 @@ import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { use, useEffect, useState } from "react";
 
-type Artifact = "requirements" | "testCases" | "traceability";
+type Artifact = "requirements" | "architecture" | "testCases" | "traceability";
 
 /**
  * Each artifact section is its own chunk. Previously all three were static imports on this
@@ -18,6 +18,10 @@ type Artifact = "requirements" | "testCases" | "traceability";
  */
 const RequirementsSection = dynamic(
   () => import("./requirements-section").then((m) => m.RequirementsSection),
+  { loading: () => <p className="p-6 text-sm text-muted-foreground">Loading…</p> },
+);
+const ArchitectureSection = dynamic(
+  () => import("./architecture-section").then((m) => m.ArchitectureSection),
   { loading: () => <p className="p-6 text-sm text-muted-foreground">Loading…</p> },
 );
 const TestCasesSection = dynamic(
@@ -35,12 +39,26 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
 
   const artifactParam = searchParams.get("artifact");
   const artifact: Artifact =
-    artifactParam === "testCases" ? "testCases" : artifactParam === "traceability" ? "traceability" : "requirements";
+    artifactParam === "architecture"
+      ? "architecture"
+      : artifactParam === "testCases"
+        ? "testCases"
+        : artifactParam === "traceability"
+          ? "traceability"
+          : "requirements";
   const levelParam = searchParams.get("level");
 
   const requirementLevels = trpc.requirements.listLevels.useQuery();
+  const architectureLevels = trpc.architecture.listLevels.useQuery();
   const testLevels = trpc.testCases.listLevels.useQuery();
-  const levels = artifact === "requirements" ? requirementLevels.data : artifact === "testCases" ? testLevels.data : null;
+  const levels =
+    artifact === "requirements"
+      ? requirementLevels.data
+      : artifact === "architecture"
+        ? architectureLevels.data
+        : artifact === "testCases"
+          ? testLevels.data
+          : null;
 
   // Read in an effect, not during render - localStorage is unavailable during SSR, and
   // reading it synchronously would make the server and first client render disagree.
@@ -84,6 +102,8 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
         </div>
       ) : artifact === "requirements" ? (
         <RequirementsSection productId={productId} levelId={activeLevelId} />
+      ) : artifact === "architecture" ? (
+        <ArchitectureSection productId={productId} levelId={activeLevelId} />
       ) : (
         <TestCasesSection productId={productId} levelId={activeLevelId} />
       )}

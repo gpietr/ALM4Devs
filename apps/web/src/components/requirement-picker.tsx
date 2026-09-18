@@ -36,8 +36,10 @@ function optionLabel(option: RequirementOption): string {
  * convention (see ComboboxInput's keydown handler) - fine for an in-progress typed value,
  * but destructive here: these chips are already-committed requirement links, not a draft,
  * and Escape is also the natural way to dismiss a popover this picker may sit in. Shared by
- * both pickers below. */
-function guardEscapeClear(onChange: (ids: string[]) => void) {
+ * both pickers below, and by architecture-picker.tsx's ArchitecturePicker/TestCasePicker -
+ * exported so those chip comboboxes stay in lockstep with this Escape-key behavior instead
+ * of re-declaring their own copy. */
+export function guardEscapeClear(onChange: (ids: string[]) => void) {
   return (ids: string[], eventDetails: { reason: string; cancel: () => void }) => {
     if (eventDetails.reason === "escape-key") {
       eventDetails.cancel()

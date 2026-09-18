@@ -49,6 +49,11 @@ const NAV_GROUPS: ReadonlyArray<{
         match: (p) => p === "/settings/requirement-levels",
       },
       {
+        href: "/settings/architecture-levels",
+        label: "Architecture levels",
+        match: (p) => p === "/settings/architecture-levels",
+      },
+      {
         href: "/settings/test-levels",
         label: "Test case levels",
         match: (p) => p === "/settings/test-levels",

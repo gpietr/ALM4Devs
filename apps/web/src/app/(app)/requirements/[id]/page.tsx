@@ -10,6 +10,7 @@ import {
   CustomFieldReadout,
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
+import { ArchitecturePicker } from "@/components/architecture-picker";
 import { RichTextEditor } from "@/components/rich-text-editor";
 import { RichTextView } from "@/components/rich-text-view";
 import { StatusPill } from "@/components/status-pill";
@@ -47,6 +48,13 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
     },
   });
   const deleteRequirement = trpc.requirements.delete.useMutation();
+  const setArchitectureLinks = trpc.requirements.setArchitectureLinks.useMutation({
+    onSuccess: () => utils.requirements.get.invalidate({ id }),
+  });
+  const architectureOptions = trpc.architecture.listAllByProduct.useQuery(
+    { productId: detail.data?.requirement.productId ?? "" },
+    { enabled: !!detail.data?.requirement.productId },
+  );
 
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState("");
@@ -55,6 +63,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   const [pendingEsign, setPendingEsign] = useState<{ category: string; label: string } | null>(null);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
+  const [architectureNodeIds, setArchitectureNodeIds] = useState<string[]>([]);
 
   // Open a draft straight into the edit form (title, description, background, and
   // tenant-defined fields together). Approved/in-review land read-only; approved can
@@ -70,6 +79,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
     setDescription(latest.description);
     setBackground(latest.background ?? "");
     setCustomFieldState(customFieldFormStateFromValues(detail.data.customFieldValues));
+    setArchitectureNodeIds(detail.data.architectureLinks.map((l) => l.id));
     if (latest.statusCategory === "draft") setEditing(true);
   }, [detail.data]);
 
@@ -77,7 +87,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   if (detail.error) return <main className="mx-auto max-w-4xl px-5 py-16 text-sm text-destructive">{detail.error.message}</main>;
   if (!detail.data) return null;
 
-  const { requirement, versions, children, coveringTestCases, customFieldValues } = detail.data;
+  const { requirement, versions, children, coveringTestCases, architectureLinks, customFieldValues } = detail.data;
   const current = versions[0];
   if (!current) return null;
 
@@ -299,6 +309,55 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
         )}
       </div>
       {transition.error && <p className="mt-2 text-sm text-destructive">{transition.error.message}</p>}
+
+
+      <div className="mt-3 text-sm text-muted-foreground">
+        {architectureLinks.length > 0 ? (
+          <>
+            Architecture:{" "}
+            {architectureLinks.map((n, i) => (
+              <span key={n.id}>
+                {i > 0 && ", "}
+                <Link href={`/architecture/${n.id}`} className="text-primary underline underline-offset-2 hover:text-primary/80">
+                  {n.displayId}: {n.title}
+                </Link>
+              </span>
+            ))}
+          </>
+        ) : (
+          "Not linked to any architecture node yet."
+        )}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <Label className="flex-col items-start gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Linked software items</span>
+          <ArchitecturePicker
+            options={architectureOptions.data ?? []}
+            value={architectureNodeIds}
+            onChange={setArchitectureNodeIds}
+          />
+        </Label>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={
+            setArchitectureLinks.isPending ||
+            JSON.stringify([...architectureNodeIds].sort()) ===
+              JSON.stringify(architectureLinks.map((l) => l.id).sort())
+          }
+          onClick={() =>
+            setArchitectureLinks.mutate({ requirementId: id, architectureNodeIds })
+          }
+        >
+          {setArchitectureLinks.isPending ? "Saving…" : "Save links"}
+        </Button>
+        {setArchitectureLinks.error && (
+          <p className="text-sm text-destructive">{setArchitectureLinks.error.message}</p>
+        )}
+      </div>
+
 
       <h2 className="mt-10 text-sm font-medium text-foreground">Version history</h2>
       <ul className="mt-2 divide-y divide-border overflow-hidden rounded-md border text-sm">

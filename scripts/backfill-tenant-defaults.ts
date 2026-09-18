@@ -1,4 +1,5 @@
 import {
+  seedDefaultArchitectureLevels,
   seedDefaultEnvironments,
   seedDefaultLevels,
   seedDefaultStatuses,
@@ -84,6 +85,21 @@ async function main() {
   for (const tenant of tenantsMissingTestLevels) {
     await withTenant(appDb, tenant.id, (tx) => seedDefaultTestLevels(tx, tenant.id));
     console.log(`Seeded default test levels for tenant "${tenant.name}" (${tenant.id})`);
+    anyFixed = true;
+  }
+
+  const tenantsMissingArchitectureLevels = await adminDb
+    .select({ id: schema.tenants.id, name: schema.tenants.name })
+    .from(schema.tenants)
+    .leftJoin(
+      schema.levels,
+      and(eq(schema.levels.tenantId, schema.tenants.id), eq(schema.levels.kind, "architecture")),
+    )
+    .groupBy(schema.tenants.id, schema.tenants.name)
+    .having(sql`count(${schema.levels.id}) = 0`);
+  for (const tenant of tenantsMissingArchitectureLevels) {
+    await withTenant(appDb, tenant.id, (tx) => seedDefaultArchitectureLevels(tx, tenant.id));
+    console.log(`Seeded default architecture levels for tenant "${tenant.name}" (${tenant.id})`);
     anyFixed = true;
   }
 

@@ -12,11 +12,14 @@ import {
   getLlmConnection,
   getTestCaseWithSteps,
   getTestLevel,
+  listArchitectureDisplayIdsByTestCase,
+  listArchitectureLinksForTestCase,
   listEnvironments,
   listEvidenceForStepExecution,
   listRequirementsForStepSuggestions,
   listTestLevels,
   recordStepResult,
+  replaceTestCaseArchitectureLinks,
   sanitizeRichText,
   startExecution,
   updateTestCase,
@@ -153,11 +156,13 @@ export const testCasesRouter = router({
         // For the list table's configurable columns (see the column picker on
         // the product page) - one batched query for every row rather than N+1.
         const customFieldsByTestCase = await getCustomFieldValuesForEntities(tx, tenantId, "test_case", ids);
+        const architectureByTestCase = await listArchitectureDisplayIdsByTestCase(tx, tenantId, ids);
 
         return rows.map((r) => ({
           ...r,
           levelCode: level.code,
           coversCount: coversCount.get(r.id) ?? 0,
+          architectureLinks: architectureByTestCase.get(r.id) ?? [],
           customFieldValues: customFieldsByTestCase.get(r.id) ?? [],
         }));
       });
@@ -217,12 +222,14 @@ export const testCasesRouter = router({
         .orderBy(desc(schema.testExecutions.startedAt));
 
       const customFieldValues = await getCustomFieldValues(tx, tenantId, "test_case", input.id);
+      const architectureLinks = await listArchitectureLinksForTestCase(tx, tenantId, input.id);
 
       return {
         testCase: { ...testCase, levelCode: level.code },
         steps: stepsWithLinks,
         effectiveRequirementLinks,
         directRequirementIds: directRequirementLinks.map((l) => l.requirementId),
+        architectureLinks,
         executions,
         customFieldValues,
       };
@@ -263,6 +270,7 @@ export const testCasesRouter = router({
         testCaseId: z.string().uuid(),
         title: z.string().trim().min(1).max(300),
         requirementIds: z.array(z.string().uuid()).optional(),
+        architectureNodeIds: z.array(z.string().uuid()).optional(),
         steps: z.array(testStepInputSchema.extend({ id: z.string().uuid().optional() })).min(1),
         customFieldValues: z.array(customFieldValueSchema).optional(),
       }),
@@ -270,8 +278,8 @@ export const testCasesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
       const userId = userIdOf(ctx);
-      return withTenant(db, tenantId, (tx) =>
-        updateTestCase(tx, {
+      return withTenant(db, tenantId, async (tx) => {
+        const result = await updateTestCase(tx, {
           tenantId,
           testCaseId: input.testCaseId,
           title: input.title,
@@ -279,8 +287,17 @@ export const testCasesRouter = router({
           steps: input.steps,
           actorUserId: userId,
           customFieldValues: input.customFieldValues as CustomFieldValueInput[] | undefined,
-        }),
-      ).catch(toBadRequest);
+        });
+        if (input.architectureNodeIds !== undefined) {
+          await replaceTestCaseArchitectureLinks(tx, {
+            tenantId,
+            testCaseId: input.testCaseId,
+            productId: result.testCase.productId,
+            architectureNodeIds: input.architectureNodeIds,
+          });
+        }
+        return result;
+      }).catch(toBadRequest);
     }),
 
   startExecution: protectedProcedure

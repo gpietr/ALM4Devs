@@ -1585,6 +1585,23 @@ add its own coverage there rather than relying on manual `curl`/browser verifica
   via the "AI tools" tab, and confirmed the pending proposal and Accept button were still
   there - PASS.
 
+- [ ] **9.49. Architecture module** — product-scoped software architecture trees (software
+  items, software units, OTS) with tenant-defined levels (seeded System Architecture /
+  Software Architecture; a tenant can add more, e.g. one level per software). Each
+  `(product, architecture-level)` is its own containment tree; parents cannot cross
+  levels. Mermaid diagram is generated from the tree and can rewrite parentage/titles of
+  existing nodes (Apply / Reset); Apply does not create or delete nodes.
+
+  **Links.** Requirements and test cases can each link to many architecture nodes
+  (items / units / OTS), and each node can link to many requirements and test cases.
+  Architecture Trace view lists nodes with their linked reqs/TCs; requirement and test-
+  case lists expose a selectable Architecture column.
+
+  **Explicitly not in this release** (schema comments only): SBOM generation and
+  vulnerability search on OTS (supplier + version are already stored as identity);
+  detailed designs on software units; versioning/approval of architecture snapshots for
+  the DHF.
+
 - [ ] **10. Self-host packaging** — finalize `docker-compose.yml` for external users (env
   templating, first-run setup docs), confirm the three-service topology holds up outside the
   dev environment.

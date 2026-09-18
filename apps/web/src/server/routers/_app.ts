@@ -1,6 +1,7 @@
 import { protectedProcedure, router } from "../trpc";
 import { documentTemplatesRouter } from "./document-templates";
 import { llmRouter } from "./llm";
+import { architectureRouter } from "./architecture";
 import { productsRouter } from "./products";
 import { requirementsRouter } from "./requirements";
 import { settingsRouter } from "./settings";
@@ -17,6 +18,7 @@ export const appRouter = router({
       tenantId: user.tenantId ?? null,
     };
   }),
+  architecture: architectureRouter,
   documentTemplates: documentTemplatesRouter,
   llm: llmRouter,
   products: productsRouter,

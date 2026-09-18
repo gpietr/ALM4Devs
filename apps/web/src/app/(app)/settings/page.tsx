@@ -35,6 +35,11 @@ const SECTIONS: ReadonlyArray<{
         description: "Hierarchy levels and id-prefix codes (e.g. SYSREQ).",
       },
       {
+        href: "/settings/architecture-levels",
+        title: "Architecture levels",
+        description: "System vs software architecture, or one level per software.",
+      },
+      {
         href: "/settings/test-levels",
         title: "Test case levels",
         description: "Organize test cases the same way as requirements.",

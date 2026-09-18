@@ -12,7 +12,7 @@ interface JumpItem {
   href: string;
   displayId: string;
   title: string;
-  kind: "requirement" | "test case";
+  kind: "requirement" | "architecture" | "test case";
 }
 
 /**
@@ -54,6 +54,10 @@ export function JumpToItem({ productId }: { productId: string | null }) {
     { productId: productId ?? "" },
     { enabled: open && !!productId },
   );
+  const architecture = trpc.architecture.listAllByProduct.useQuery(
+    { productId: productId ?? "" },
+    { enabled: open && !!productId },
+  );
   const testCases = trpc.testCases.listAllByProduct.useQuery(
     { productId: productId ?? "" },
     { enabled: open && !!productId },
@@ -66,14 +70,20 @@ export function JumpToItem({ productId }: { productId: string | null }) {
       title: r.title,
       kind: "requirement" as const,
     }));
+    const arch = (architecture.data ?? []).map((n) => ({
+      href: `/architecture/${n.id}`,
+      displayId: formatItemId(n.levelCode, n.sequenceNumber),
+      title: n.title,
+      kind: "architecture" as const,
+    }));
     const tcs = (testCases.data ?? []).map((t) => ({
       href: `/test-cases/${t.id}`,
       displayId: formatItemId(t.levelCode, t.sequenceNumber),
       title: t.title,
       kind: "test case" as const,
     }));
-    return [...reqs, ...tcs];
-  }, [requirements.data, testCases.data]);
+    return [...reqs, ...arch, ...tcs];
+  }, [requirements.data, architecture.data, testCases.data]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -93,7 +103,7 @@ export function JumpToItem({ productId }: { productId: string | null }) {
     router.push(item.href);
   }
 
-  const loading = requirements.isLoading || testCases.isLoading;
+  const loading = requirements.isLoading || architecture.isLoading || testCases.isLoading;
 
   return (
     <>

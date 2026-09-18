@@ -366,6 +366,21 @@ export async function createOrUpdateRequirementFromImport(
     return { action: customFieldsResult.changed ? "updated" : "unchanged", requirementId: existingId };
   }
 
+  // editDraftVersion also allows "approved" (it starts a new draft version there) so that
+  // a human editing the requirement page can rework an approved requirement - but an
+  // importer is explicitly not that (see this function's docstring): re-running an import
+  // must never reopen an approved/in-review/baselined requirement just because the source
+  // changed. Check the category ourselves rather than relying on editDraftVersion to
+  // reject non-draft categories, since it no longer does for "approved".
+  const currentStatus = await getStatusById(db, params.tenantId, currentVersion.statusId);
+  if ((currentStatus.category as RequirementStatusCategory) !== "draft") {
+    return {
+      action: "skipped",
+      requirementId: existingId,
+      note: "requirement has moved past Draft; import does not overwrite it",
+    };
+  }
+
   try {
     await editDraftVersion(db, {
       tenantId: params.tenantId,

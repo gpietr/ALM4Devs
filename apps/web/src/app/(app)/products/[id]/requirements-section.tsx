@@ -37,12 +37,13 @@ const RichTextEditor = dynamic(
 const ANY = "any";
 
 const BUILTIN_COLUMNS: ListColumn[] = [
-  { id: "id", label: "ID" },
+  { id: "id", label: "ID", required: true },
   { id: "title", label: "Requirement" },
   { id: "version", label: "Ver" },
   { id: "status", label: "Status" },
   { id: "traces", label: "Traces to" },
   { id: "coverage", label: "Coverage" },
+  { id: "architecture", label: "Software items", defaultVisible: false },
 ];
 
 interface SortableRequirement {
@@ -338,6 +339,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                 {visible.has("coverage") && (
                   <SortableTableHead label="Coverage" sortKey="covered" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[150px]" />
                 )}
+                {visible.has("architecture") && <TableHead className="w-[160px]">Architecture</TableHead>}
                 {visibleCustomFields.map((f) => (
                   <TableHead key={f.id}>{f.name}</TableHead>
                 ))}
@@ -398,6 +400,11 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                             No coverage
                           </span>
                         )}
+                      </TableCell>
+                    )}
+                    {visible.has("architecture") && (
+                      <TableCell className="max-w-[160px] truncate font-mono text-[12.5px] text-muted-foreground">
+                        {r.architectureLinks.length > 0 ? r.architectureLinks.join(", ") : "—"}
                       </TableCell>
                     )}
                     {visibleCustomFields.map((f) => (

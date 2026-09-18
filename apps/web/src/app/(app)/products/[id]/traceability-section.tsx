@@ -24,7 +24,9 @@ const ANY = "any";
 
 const BUILTIN_COLUMNS: ListColumn[] = [
   { id: "reqId", label: "ID" },
-  { id: "requirement", label: "Requirement" },
+  // Unlike reqId (plain text), this cell is the only Link into the requirement - keep it
+  // un-hideable so a filtered-down matrix always has a way to open the row's requirement.
+  { id: "requirement", label: "Requirement", required: true },
   { id: "testId", label: "Test ID" },
   { id: "testCase", label: "Test Case" },
   { id: "lastExecution", label: "Last Execution" },

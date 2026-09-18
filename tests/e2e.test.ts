@@ -2669,3 +2669,410 @@ describe("e2e: AI-assisted test step drafting (backlog item 9.37)", () => {
     expect(asB.data).toBeNull();
   });
 });
+
+describe("e2e: architecture", () => {
+  async function setupProduct(tenant: TestTenant) {
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "Architecture Product" });
+    expect(product.ok).toBe(true);
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    expect(levels.ok).toBe(true);
+    const sys = levels.data.find((l: any) => l.code === "SYSARCH");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    expect(sys).toBeTruthy();
+    expect(sw).toBeTruthy();
+    return { productId: product.data.id as string, sys, sw };
+  }
+
+  async function createNode(
+    tenant: TestTenant,
+    input: {
+      productId: string;
+      levelId: string;
+      kind: "software_item" | "software_unit" | "ots";
+      parentId?: string;
+      title: string;
+    },
+  ) {
+    return rpc(tenant.cookie, "POST", "architecture.create", input);
+  }
+
+  test("registering seeds SYSARCH and SWARCH", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    expect(levels.ok).toBe(true);
+    expect(levels.data.map((l: any) => l.code)).toEqual(["SYSARCH", "SWARCH"]);
+    expect(levels.data.map((l: any) => l.name)).toEqual(["System Architecture", "Software Architecture"]);
+  });
+
+  test("trees are isolated per architecture level", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, sys, sw } = await setupProduct(tenant);
+
+    const sysItem = await createNode(tenant, {
+      productId,
+      levelId: sys.id,
+      kind: "software_item",
+      title: "System item",
+    });
+    expect(sysItem.ok).toBe(true);
+
+    const swItem = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Software item",
+    });
+    expect(swItem.ok).toBe(true);
+
+    const crossed = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      parentId: sysItem.data.node.id,
+      title: "Cross-level child",
+    });
+    expect(crossed.ok).toBe(false);
+    expect(crossed.error?.message).toMatch(/same architecture level/);
+
+    const sysTree = await rpc(tenant.cookie, "GET", "architecture.listByProduct", { productId, levelId: sys.id });
+    const swTree = await rpc(tenant.cookie, "GET", "architecture.listByProduct", { productId, levelId: sw.id });
+    expect(sysTree.data.nodes.map((n: any) => n.id)).toEqual([sysItem.data.node.id]);
+    expect(swTree.data.nodes.map((n: any) => n.id)).toEqual([swItem.data.node.id]);
+  });
+
+  test("nested item, unit, and OTS under both an item and a unit", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, sw } = await setupProduct(tenant);
+
+    const item = await createNode(tenant, { productId, levelId: sw.id, kind: "software_item", title: "Controller" });
+    expect(item.ok).toBe(true);
+    const nested = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      parentId: item.data.node.id,
+      title: "Nested item",
+    });
+    expect(nested.ok).toBe(true);
+    const unit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_unit",
+      parentId: nested.data.node.id,
+      title: "Control loop",
+    });
+    expect(unit.ok).toBe(true);
+    const otsUnderItem = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: item.data.node.id,
+      title: "Library under item",
+    });
+    expect(otsUnderItem.ok).toBe(true);
+    const otsUnderUnit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: unit.data.node.id,
+      title: "Library under unit",
+    });
+    expect(otsUnderUnit.ok).toBe(true);
+
+    const tree = await rpc(tenant.cookie, "GET", "architecture.listByProduct", { productId, levelId: sw.id });
+    expect(tree.data.tree).toHaveLength(1);
+    expect(tree.data.tree[0].children.map((c: any) => c.title).sort()).toEqual(["Library under item", "Nested item"]);
+    const nestedNode = tree.data.tree[0].children.find((c: any) => c.title === "Nested item");
+    expect(nestedNode.children).toHaveLength(1);
+    expect(nestedNode.children[0].title).toBe("Control loop");
+    expect(nestedNode.children[0].children[0].title).toBe("Library under unit");
+    expect(tree.data.mermaid).toMatch(/^flowchart TB\n  n1\[/);
+    expect(tree.data.mermaid).not.toMatch(/^\s*[A-Z]+-\d+/m);
+  });
+
+  test("containment rules reject illegal parents and children", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, sw } = await setupProduct(tenant);
+
+    const unitAtRoot = await createNode(tenant, { productId, levelId: sw.id, kind: "software_unit", title: "Orphan unit" });
+    expect(unitAtRoot.ok).toBe(false);
+    expect(unitAtRoot.error?.message).toMatch(/software item can sit at the root/);
+
+    const otsAtRoot = await createNode(tenant, { productId, levelId: sw.id, kind: "ots", title: "Orphan OTS" });
+    expect(otsAtRoot.ok).toBe(false);
+    expect(otsAtRoot.error?.message).toMatch(/software item can sit at the root/);
+
+    const item = await createNode(tenant, { productId, levelId: sw.id, kind: "software_item", title: "Item" });
+    const unit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_unit",
+      parentId: item.data.node.id,
+      title: "Unit",
+    });
+    expect(unit.ok).toBe(true);
+
+    const itemUnderUnit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      parentId: unit.data.node.id,
+      title: "Item under unit",
+    });
+    expect(itemUnderUnit.ok).toBe(false);
+    expect(itemUnderUnit.error?.message).toMatch(/software unit may only contain OTS/);
+
+    const unitUnderUnit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_unit",
+      parentId: unit.data.node.id,
+      title: "Unit under unit",
+    });
+    expect(unitUnderUnit.ok).toBe(false);
+    expect(unitUnderUnit.error?.message).toMatch(/software unit may only contain OTS/);
+
+    const ots = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: item.data.node.id,
+      title: "OTS leaf",
+    });
+    expect(ots.ok).toBe(true);
+    const childOfOts = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: ots.data.node.id,
+      title: "OTS child",
+    });
+    expect(childOfOts.ok).toBe(false);
+    expect(childOfOts.error?.message).toMatch(/OTS item cannot have children/);
+  }, 30000);
+
+  test("a software unit title can be renamed in place", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, sw } = await setupProduct(tenant);
+    const item = await createNode(tenant, { productId, levelId: sw.id, kind: "software_item", title: "Item" });
+    const unit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_unit",
+      parentId: item.data.node.id,
+      title: "Unit",
+    });
+    expect(unit.ok).toBe(true);
+
+    const renamed = await rpc(tenant.cookie, "POST", "architecture.update", {
+      id: unit.data.node.id,
+      title: "Control loop",
+    });
+    expect(renamed.ok).toBe(true);
+    expect(renamed.data.node.title).toBe("Control loop");
+    expect(renamed.data.node.parentId).toBe(item.data.node.id);
+  });
+
+  test("creating a product seeds SYSARCH and SWARCH when the tenant has none", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const pg = new SQL(PG_SUPERUSER_URL);
+    try {
+      await pg`delete from levels where tenant_id = ${tenant.tenantId}::uuid and kind = 'architecture'`;
+    } finally {
+      await pg.close();
+    }
+
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "After wipe" });
+    expect(product.ok).toBe(true);
+
+    const pgCheck = new SQL(PG_SUPERUSER_URL);
+    try {
+      const rows = await pgCheck`
+        select code from levels
+        where tenant_id = ${tenant.tenantId}::uuid and kind = 'architecture'
+        order by sort_order
+      `;
+      expect(rows.map((r: { code: string }) => r.code)).toEqual(["SYSARCH", "SWARCH"]);
+    } finally {
+      await pgCheck.close();
+    }
+  });
+
+  test("listLevels seeds SYSARCH and SWARCH when the tenant has none", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const pg = new SQL(PG_SUPERUSER_URL);
+    try {
+      await pg`delete from levels where tenant_id = ${tenant.tenantId}::uuid and kind = 'architecture'`;
+    } finally {
+      await pg.close();
+    }
+
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    expect(levels.ok).toBe(true);
+    expect(levels.data.map((l: any) => l.code)).toEqual(["SYSARCH", "SWARCH"]);
+  });
+
+  test("delete is blocked while children exist", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, sw } = await setupProduct(tenant);
+    const item = await createNode(tenant, { productId, levelId: sw.id, kind: "software_item", title: "Item" });
+    await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      parentId: item.data.node.id,
+      title: "Child",
+    });
+
+    const blocked = await rpc(tenant.cookie, "POST", "architecture.delete", { id: item.data.node.id });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error?.message).toMatch(/still has children/);
+
+    const stillThere = await rpc(tenant.cookie, "GET", "architecture.get", { id: item.data.node.id });
+    expect(stillThere.ok).toBe(true);
+  });
+
+  test("cannot delete an architecture level that still has nodes", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, sw } = await setupProduct(tenant);
+    await createNode(tenant, { productId, levelId: sw.id, kind: "software_item", title: "Item" });
+
+    const blocked = await rpc(tenant.cookie, "POST", "settings.deleteArchitectureLevel", { levelId: sw.id });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error?.message).toMatch(/architecture nodes using it/);
+
+    const extra = await rpc(tenant.cookie, "POST", "settings.createArchitectureLevel", {
+      name: "Pump Software",
+      code: "PUMPSW",
+    });
+    expect(extra.ok).toBe(true);
+    const deleted = await rpc(tenant.cookie, "POST", "settings.deleteArchitectureLevel", { levelId: extra.data.id });
+    expect(deleted.ok).toBe(true);
+  });
+
+  test("nodes can link many requirements and test cases; lists and trace reflect them", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, sw } = await setupProduct(tenant);
+
+    const unit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Linked unit host",
+    });
+    expect(unit.ok).toBe(true);
+    const unitId = unit.data.node.id as string;
+
+    const otherUnit = await createNode(tenant, {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Second unit",
+    });
+    expect(otherUnit.ok).toBe(true);
+    const otherUnitId = otherUnit.data.node.id as string;
+
+    const reqLevel = (await rpc(tenant.cookie, "GET", "requirements.listLevels")).data[0];
+    const reqA = await rpc(tenant.cookie, "POST", "requirements.create", {
+      productId,
+      levelId: reqLevel.id,
+      title: "Req A",
+      description: "A",
+    });
+    const reqB = await rpc(tenant.cookie, "POST", "requirements.create", {
+      productId,
+      levelId: reqLevel.id,
+      title: "Req B",
+      description: "B",
+    });
+    expect(reqA.ok).toBe(true);
+    expect(reqB.ok).toBe(true);
+    const reqAId = reqA.data.requirement.id as string;
+    const reqBId = reqB.data.requirement.id as string;
+
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const tc = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId,
+      levelId: testLevel.id,
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
+      title: "TC linked",
+      steps: [{ description: "do", expectedResult: "ok" }],
+    });
+    expect(tc.ok).toBe(true);
+    const tcId = tc.data.testCase.id as string;
+
+    const linked = await rpc(tenant.cookie, "POST", "architecture.update", {
+      id: unitId,
+      title: "Linked unit host",
+      requirementIds: [reqAId, reqBId],
+      testCaseIds: [tcId],
+    });
+    expect(linked.ok).toBe(true);
+
+    // Many architecture nodes per requirement (inverse write).
+    const fromReq = await rpc(tenant.cookie, "POST", "requirements.setArchitectureLinks", {
+      requirementId: reqAId,
+      architectureNodeIds: [unitId, otherUnitId],
+    });
+    expect(fromReq.ok).toBe(true);
+
+    const fromTc = await rpc(tenant.cookie, "POST", "testCases.update", {
+      testCaseId: tcId,
+      title: "TC linked",
+      architectureNodeIds: [unitId, otherUnitId],
+      steps: [{ id: tc.data.steps[0].id, description: "do", expectedResult: "ok" }],
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
+    });
+    expect(fromTc.ok).toBe(true);
+
+    const nodeDetail = await rpc(tenant.cookie, "GET", "architecture.get", { id: unitId });
+    expect(nodeDetail.ok).toBe(true);
+    expect(nodeDetail.data.requirementLinks.map((r: any) => r.id).sort()).toEqual([reqAId, reqBId].sort());
+    expect(nodeDetail.data.testCaseLinks.map((t: any) => t.id)).toEqual([tcId]);
+
+    const reqDetail = await rpc(tenant.cookie, "GET", "requirements.get", { id: reqAId });
+    expect(reqDetail.data.architectureLinks.map((n: any) => n.id).sort()).toEqual([unitId, otherUnitId].sort());
+
+    const tcDetail = await rpc(tenant.cookie, "GET", "testCases.get", { id: tcId });
+    expect(tcDetail.data.architectureLinks.map((n: any) => n.id).sort()).toEqual([unitId, otherUnitId].sort());
+
+    const reqList = await rpc(tenant.cookie, "GET", "requirements.listByProduct", {
+      productId,
+      levelId: reqLevel.id,
+    });
+    const listedReq = reqList.data.find((r: any) => r.id === reqAId);
+    expect(listedReq.architectureLinks.length).toBe(2);
+
+    const tcList = await rpc(tenant.cookie, "GET", "testCases.listByProduct", {
+      productId,
+      levelId: testLevel.id,
+    });
+    const listedTc = tcList.data.find((t: any) => t.id === tcId);
+    expect(listedTc.architectureLinks.length).toBe(2);
+
+    const trace = await rpc(tenant.cookie, "GET", "architecture.listTrace", {
+      productId,
+      levelId: sw.id,
+    });
+    expect(trace.ok).toBe(true);
+    const traceRow = trace.data.rows.find((r: any) => r.id === unitId);
+    expect(traceRow.requirementLinks.map((r: any) => r.id).sort()).toEqual([reqAId, reqBId].sort());
+    expect(traceRow.testCaseLinks.map((t: any) => t.id)).toEqual([tcId]);
+
+    // Cross-product links are rejected.
+    const otherProduct = await rpc(tenant.cookie, "POST", "products.create", { name: "Other product" });
+    const foreignReq = await rpc(tenant.cookie, "POST", "requirements.create", {
+      productId: otherProduct.data.id,
+      levelId: reqLevel.id,
+      title: "Foreign",
+      description: "no",
+    });
+    const rejected = await rpc(tenant.cookie, "POST", "architecture.update", {
+      id: unitId,
+      title: "Linked unit host",
+      requirementIds: [foreignReq.data.requirement.id],
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error?.message).toMatch(/same product/);
+  });
+});
