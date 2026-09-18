@@ -2,6 +2,7 @@
 
 import { Frame } from "@/components/frame";
 import { CpePickerDialog } from "@/components/cpe-picker-dialog";
+import { FilterChip } from "@/components/filter-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,11 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { type FilterDef, useListFilters } from "@/lib/list-filters";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
-import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type Kind = "software_item" | "software_unit" | "ots";
 
@@ -444,6 +446,21 @@ function OtsView({ productId, levelId }: { productId: string; levelId: string | 
   const utils = trpc.useUtils();
   const connection = trpc.vulnerabilities.getConnection.useQuery();
   const summary = trpc.vulnerabilities.otsSummary.useQuery({ productId, levelId: levelId! }, { enabled: !!levelId });
+  const softwareVersionOptions = trpc.softwareVersions.listByProduct.useQuery({ productId });
+  // Declarative filters - see list-filters.ts. Filters a *version* row, not a node row -
+  // each node can have several, one per OTS component version.
+  const filterDefs = useMemo<FilterDef<NonNullable<typeof summary.data>[number]["versions"][number]>[]>(
+    () => [
+      {
+        id: "version",
+        label: "Version",
+        options: (softwareVersionOptions.data ?? []).map((v) => ({ value: v.id, label: v.versionNumber })),
+        matches: (row, v) => row.softwareVersions.some((sv) => sv.id === v),
+      },
+    ],
+    [softwareVersionOptions.data],
+  );
+  const filters = useListFilters(filterDefs);
   const scanNode = trpc.vulnerabilities.scanNode.useMutation({
     onSuccess: () => {
       if (levelId) utils.vulnerabilities.otsSummary.invalidate({ productId, levelId });
@@ -531,6 +548,9 @@ function OtsView({ productId, levelId }: { productId: string; levelId: string | 
             <Switch size="sm" checked={showAllVersions} onCheckedChange={setShowAllVersions} />
             Show all versions
           </Label>
+          {filterDefs.map((def) => (
+            <FilterChip key={def.id} def={def} value={filters.active[def.id]} onChange={(v) => filters.setFilter(def.id, v)} />
+          ))}
           <Button
             type="button"
             size="sm"
@@ -569,6 +589,7 @@ function OtsView({ productId, levelId }: { productId: string; levelId: string | 
                   <TableHead>Supplier</TableHead>
                   <TableHead>Version</TableHead>
                   <TableHead>CPE</TableHead>
+                  <TableHead>Versions</TableHead>
                   <TableHead>Findings</TableHead>
                   <TableHead>Last scanned</TableHead>
                   <TableHead className="w-[80px]" />
@@ -576,9 +597,10 @@ function OtsView({ productId, levelId }: { productId: string; levelId: string | 
               </TableHeader>
               <TableBody>
                 {summary.data.map((row) => {
-                  const visibleVersions = showAllVersions ? row.versions : row.versions.filter((v) => v.isCurrent);
-                  if (visibleVersions.length === 0) {
-                    // No version recorded yet - one placeholder row for the node itself.
+                  const baseVersions = showAllVersions ? row.versions : row.versions.filter((v) => v.isCurrent);
+                  if (row.versions.length === 0) {
+                    // No version recorded yet - one placeholder row for the node itself,
+                    // shown regardless of the version filter (there's nothing to filter).
                     return (
                       <TableRow key={row.node.id}>
                         <TableCell>
@@ -587,7 +609,7 @@ function OtsView({ productId, levelId }: { productId: string; levelId: string | 
                           </Link>
                         </TableCell>
                         <TableCell className="text-[13px] text-muted-foreground">{row.node.supplier ?? "—"}</TableCell>
-                        <TableCell colSpan={5} className="text-[13px] text-muted-foreground">
+                        <TableCell colSpan={6} className="text-[13px] text-muted-foreground">
                           No version recorded yet -{" "}
                           <Link href={`/architecture/${row.node.id}`} className="underline underline-offset-2">
                             add one
@@ -597,6 +619,11 @@ function OtsView({ productId, levelId }: { productId: string; levelId: string | 
                       </TableRow>
                     );
                   }
+                  const visibleVersions = filters.applyFilters(baseVersions);
+                  // Every version this node has exists, just none tag the selected
+                  // release - omit the node entirely rather than showing a misleading
+                  // "no version recorded" placeholder for an item that in fact has one.
+                  if (visibleVersions.length === 0) return null;
                   return (
                     <Fragment key={row.node.id}>
                       {visibleVersions.map((version, i) => (
@@ -626,6 +653,11 @@ function OtsView({ productId, levelId }: { productId: string; levelId: string | 
                             title={version.cpe ?? undefined}
                           >
                             {version.cpe ?? "—"}
+                          </TableCell>
+                          <TableCell className="max-w-[140px] truncate text-[12.5px] text-muted-foreground">
+                            {version.softwareVersions.length > 0
+                              ? version.softwareVersions.map((v) => v.versionNumber).join(", ")
+                              : "—"}
                           </TableCell>
                           <TableCell>
                             {version.counts.total === 0 ? (

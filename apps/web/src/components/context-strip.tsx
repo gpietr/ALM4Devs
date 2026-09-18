@@ -108,13 +108,14 @@ function initialsFor(name?: string, email?: string): string {
   return (email?.[0] ?? "?").toUpperCase();
 }
 
-type Artifact = "requirements" | "architecture" | "testCases" | "traceability";
+type Artifact = "requirements" | "architecture" | "testCases" | "traceability" | "versions";
 
 const ARTIFACT_TABS: ReadonlyArray<{ key: Artifact; label: string }> = [
   { key: "requirements", label: "Requirements" },
   { key: "testCases", label: "Test cases" },
   { key: "traceability", label: "Traceability" },
   { key: "architecture", label: "Architecture" },
+  { key: "versions", label: "Versions" },
 ];
 
 /** Both rows for a page scoped to one product: row 1 adds the product switcher (a

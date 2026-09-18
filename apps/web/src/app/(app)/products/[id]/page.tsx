@@ -8,7 +8,7 @@ import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { use, useEffect, useState } from "react";
 
-type Artifact = "requirements" | "architecture" | "testCases" | "traceability";
+type Artifact = "requirements" | "architecture" | "testCases" | "traceability" | "versions";
 
 /**
  * Each artifact section is its own chunk. Previously all three were static imports on this
@@ -32,6 +32,10 @@ const TraceabilitySection = dynamic(
   () => import("./traceability-section").then((m) => m.TraceabilitySection),
   { loading: () => <p className="p-6 text-sm text-muted-foreground">Loading…</p> },
 );
+const VersionsSection = dynamic(
+  () => import("./versions-section").then((m) => m.VersionsSection),
+  { loading: () => <p className="p-6 text-sm text-muted-foreground">Loading…</p> },
+);
 
 export default function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: productId } = use(params);
@@ -45,7 +49,9 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
         ? "testCases"
         : artifactParam === "traceability"
           ? "traceability"
-          : "requirements";
+          : artifactParam === "versions"
+            ? "versions"
+            : "requirements";
   const levelParam = searchParams.get("level");
 
   const requirementLevels = trpc.requirements.listLevels.useQuery();
@@ -66,13 +72,14 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   // `levels?.[0]` below, same as before this existed.
   const [rememberedLevelId, setRememberedLevelId] = useState<string | null>(null);
   useEffect(() => {
-    if (artifact === "traceability") return;
+    if (artifact === "traceability" || artifact === "versions") return;
     setRememberedLevelId(getLastLevel(productId, artifact));
   }, [productId, artifact]);
 
   // URL param wins, then the remembered level, then the first level as a last resort (also
   // covers a stale remembered id whose level was since renamed/deleted). N/A to
-  // traceability, which spans every level at once.
+  // traceability/versions, which both span every level at once (versions has no levels at
+  // all).
   const activeLevelId = levels?.some((l) => l.id === levelParam)
     ? levelParam!
     : levels?.some((l) => l.id === rememberedLevelId)
@@ -82,10 +89,11 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   // saveLastLocation feeds the home page's "back to where you were" redirect (one global
   // slot - see last-location.ts); saveLastLevel remembers per (product, artifact) instead,
   // for the tab-switch case above.
+  const leveled = artifact !== "traceability" && artifact !== "versions";
   useEffect(() => {
-    saveLastLocation({ productId, artifact, levelId: artifact === "traceability" ? null : activeLevelId });
-    if (artifact !== "traceability" && activeLevelId) saveLastLevel(productId, artifact, activeLevelId);
-  }, [productId, artifact, activeLevelId]);
+    saveLastLocation({ productId, artifact, levelId: leveled ? activeLevelId : null });
+    if (leveled && activeLevelId) saveLastLevel(productId, artifact, activeLevelId);
+  }, [productId, artifact, activeLevelId, leveled]);
 
   return (
     <>
@@ -100,6 +108,8 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
         <div className="p-6">
           <TraceabilitySection productId={productId} />
         </div>
+      ) : artifact === "versions" ? (
+        <VersionsSection productId={productId} />
       ) : artifact === "requirements" ? (
         <RequirementsSection productId={productId} levelId={activeLevelId} />
       ) : artifact === "architecture" ? (

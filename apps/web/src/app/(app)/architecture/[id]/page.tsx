@@ -4,8 +4,10 @@ import { ProductContextStrip } from "@/components/context-strip";
 import { CpePickerDialog } from "@/components/cpe-picker-dialog";
 import { RequirementPicker } from "@/components/requirement-picker";
 import { TestCasePicker } from "@/components/architecture-picker";
+import { SoftwareVersionLinkList } from "@/components/software-version-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -59,6 +61,14 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
   });
   const [scanningVersionId, setScanningVersionId] = useState<string | null>(null);
 
+  const setVersionSoftwareVersions = trpc.architecture.setVersionSoftwareVersions.useMutation({
+    onSuccess: () => utils.architecture.get.invalidate({ id }),
+  });
+  const softwareVersionOptions = trpc.softwareVersions.listByProduct.useQuery(
+    { productId: detail.data?.node.productId ?? "" },
+    { enabled: !!detail.data?.node.productId },
+  );
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [parentId, setParentId] = useState<string>(NO_PARENT);
@@ -67,6 +77,7 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
   const [recordingVersion, setRecordingVersion] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [newCpe, setNewCpe] = useState("");
+  const [copyLinksFromPrevious, setCopyLinksFromPrevious] = useState(false);
   const [cpePickerOpen, setCpePickerOpen] = useState(false);
   const [requirementIds, setRequirementIds] = useState<string[]>([]);
   const [testCaseIds, setTestCaseIds] = useState<string[]>([]);
@@ -300,6 +311,17 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                       supplier/version keyword search.
                     </span>
                   </Label>
+                  {node.currentVersion && (
+                    <Label>
+                      <Checkbox
+                        checked={copyLinksFromPrevious}
+                        onCheckedChange={(checked) => setCopyLinksFromPrevious(checked)}
+                      />
+                      <span className="text-[13px]">
+                        Copy &ldquo;applies to versions&rdquo; links from {node.currentVersion.version}
+                      </span>
+                    </Label>
+                  )}
                   {recordVersion.error && <p className="text-sm text-destructive">{recordVersion.error.message}</p>}
                   <div className="flex gap-2">
                     <Button
@@ -308,12 +330,19 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                       disabled={recordVersion.isPending || !newVersion.trim()}
                       onClick={() =>
                         recordVersion.mutate(
-                          { nodeId: id, version: newVersion, cpe: newCpe || undefined },
+                          {
+                            nodeId: id,
+                            version: newVersion,
+                            cpe: newCpe || undefined,
+                            copyLinksFromVersionId:
+                              copyLinksFromPrevious && node.currentVersion ? node.currentVersion.id : undefined,
+                          },
                           {
                             onSuccess: () => {
                               setRecordingVersion(false);
                               setNewVersion("");
                               setNewCpe("");
+                              setCopyLinksFromPrevious(false);
                             },
                           },
                         )
@@ -329,6 +358,7 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                         setRecordingVersion(false);
                         setNewVersion("");
                         setNewCpe("");
+                        setCopyLinksFromPrevious(false);
                       }}
                     >
                       Cancel
@@ -354,42 +384,63 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                   {versionHistory.map((v) => {
                     const isCurrent = v.id === node.currentVersion?.id;
                     return (
-                      <li key={v.id} className="flex items-center justify-between gap-2 text-[12.5px]">
-                        <span>
-                          <span className={isCurrent ? "font-medium text-foreground" : "text-muted-foreground"}>
-                            {v.version}
-                          </span>{" "}
-                          {v.cpe && <span className="font-mono text-[11px] text-muted-foreground">{v.cpe}</span>}{" "}
-                          <span className="text-muted-foreground">
-                            · {new Date(v.createdAt).toLocaleDateString()}
+                      <li key={v.id} className="space-y-1 text-[12.5px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>
+                            <span className={isCurrent ? "font-medium text-foreground" : "text-muted-foreground"}>
+                              {v.version}
+                            </span>{" "}
+                            {v.cpe && <span className="font-mono text-[11px] text-muted-foreground">{v.cpe}</span>}{" "}
+                            <span className="text-muted-foreground">
+                              · {new Date(v.createdAt).toLocaleDateString()}
+                            </span>
+                            {isCurrent && (
+                              <Badge variant="outline" className="ml-1.5">
+                                current
+                              </Badge>
+                            )}
                           </span>
-                          {isCurrent && (
-                            <Badge variant="outline" className="ml-1.5">
-                              current
-                            </Badge>
-                          )}
-                        </span>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={scanningVersionId === v.id}
-                          onClick={() => {
-                            setScanningVersionId(v.id);
-                            scanVersion.mutate(
-                              { nodeId: id, versionId: isCurrent ? undefined : v.id },
-                              { onSettled: () => setScanningVersionId(null) },
-                            );
-                          }}
-                        >
-                          {scanningVersionId === v.id ? "Scanning…" : "Scan"}
-                        </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={scanningVersionId === v.id}
+                            onClick={() => {
+                              setScanningVersionId(v.id);
+                              scanVersion.mutate(
+                                { nodeId: id, versionId: isCurrent ? undefined : v.id },
+                                { onSettled: () => setScanningVersionId(null) },
+                              );
+                            }}
+                          >
+                            {scanningVersionId === v.id ? "Scanning…" : "Scan"}
+                          </Button>
+                        </div>
+                        {/* Which releases shipped with this exact component version -
+                            e.g. "Log4j 2.14.1 shipped in v1.0". Saves immediately on
+                            change (no separate button) since this is a standalone tag,
+                            not part of the page's own Save form. */}
+                        <SoftwareVersionLinkList
+                          options={softwareVersionOptions.data ?? []}
+                          value={v.softwareVersions.map((sv) => sv.id)}
+                          onChange={(softwareVersionIds) =>
+                            setVersionSoftwareVersions.mutate({
+                              nodeId: id,
+                              architectureNodeVersionId: v.id,
+                              softwareVersionIds,
+                            })
+                          }
+                          addLabel="Applies to versions"
+                        />
                       </li>
                     );
                   })}
                 </ul>
               )}
               {scanVersion.error && <p className="mt-1.5 text-sm text-destructive">{scanVersion.error.message}</p>}
+              {setVersionSoftwareVersions.error && (
+                <p className="mt-1.5 text-sm text-destructive">{setVersionSoftwareVersions.error.message}</p>
+              )}
             </div>
           </div>
         )}

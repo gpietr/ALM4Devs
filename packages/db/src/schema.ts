@@ -860,6 +860,57 @@ export const architectureNodeTestCaseLinks = pgTable(
   (t) => [primaryKey({ columns: [t.architectureNodeId, t.testCaseId] })],
 );
 
+// --- Software versions (release train) ----------------------------------------------
+// A product's own releases ("v1.0", "v1.1", ...) - distinct from requirementVersions/
+// architectureNodeVersions, which track revisions of one item's *content*, not the
+// product's ship history. releaseDate is a timestamp (not a `date` column - there's no
+// precedent for that type anywhere in this schema) even though only the date portion is
+// ever set/shown.
+export const softwareVersions = pgTable(
+  "software_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    versionNumber: text("version_number").notNull(),
+    description: text("description"),
+    releaseDate: timestamp("release_date", { withTimezone: true }),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique().on(t.productId, t.versionNumber)],
+);
+
+// Which software version(s) a requirement, test case, or OTS component version applies
+// to. Polymorphic ((entityType, entityId), not three near-identical join tables) because
+// three unrelated entity types attach to the same software version - the same shape as
+// custom_field_values.entityId (schema comment above), which has no FK for the same
+// reason: it can't point at three different tables at once. entityType is CHECK-
+// constrained (manual migration) to 'requirement' | 'test_case' | 'architecture_node_version'.
+// Integrity of entityId is enforced at the app layer by replaceSoftwareVersionLinks
+// (packages/core/src/software-versions.ts), the same trust boundary already accepted for
+// custom_field_values.
+export const softwareVersionLinks = pgTable(
+  "software_version_links",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    softwareVersionId: uuid("software_version_id")
+      .notNull()
+      .references(() => softwareVersions.id, { onDelete: "cascade" }),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.softwareVersionId, t.entityType, t.entityId] })],
+);
+
 // --- NVD vulnerability scanning for OTS architecture items --------------------------
 // One row per tenant, same shape/trust-boundary reasoning as spiraConnections/
 // llmConnections above (plaintext key, no KMS layer). Unlike those two, an unset key is

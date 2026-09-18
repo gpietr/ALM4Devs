@@ -3509,3 +3509,350 @@ describe("e2e: NVD vulnerability scanning for OTS architecture items", () => {
     expect(previousAfter.counts.total).toBe(0);
   });
 });
+
+describe("e2e: software versions module", () => {
+  test("create, list, update, and delete a software version", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+
+    const created = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId,
+      versionNumber: "1.0.0",
+      description: "First release",
+      releaseDate: "2026-01-15",
+    });
+    expect(created.ok).toBe(true);
+    expect(created.data).toMatchObject({ versionNumber: "1.0.0", description: "First release" });
+
+    const listed = await rpc(tenant.cookie, "GET", "softwareVersions.listByProduct", { productId });
+    expect(listed.data.map((v: any) => v.versionNumber)).toEqual(["1.0.0"]);
+
+    const updated = await rpc(tenant.cookie, "POST", "softwareVersions.update", {
+      id: created.data.id,
+      versionNumber: "1.0.1",
+      description: "Patched",
+    });
+    expect(updated.ok).toBe(true);
+    expect(updated.data.versionNumber).toBe("1.0.1");
+
+    const deleted = await rpc(tenant.cookie, "POST", "softwareVersions.delete", { id: created.data.id });
+    expect(deleted.ok).toBe(true);
+    const afterDelete = await rpc(tenant.cookie, "GET", "softwareVersions.listByProduct", { productId });
+    expect(afterDelete.data).toHaveLength(0);
+  });
+
+  test("version numbers must be unique per product, but not across products", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const productA = await rpc(tenant.cookie, "POST", "products.create", { name: "A" });
+    const productB = await rpc(tenant.cookie, "POST", "products.create", { name: "B" });
+
+    const first = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId: productA.data.id,
+      versionNumber: "1.0.0",
+    });
+    expect(first.ok).toBe(true);
+
+    const duplicate = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId: productA.data.id,
+      versionNumber: "1.0.0",
+    });
+    expect(duplicate.ok).toBe(false);
+    expect(duplicate.error?.message).toMatch(/already exists/);
+
+    // Same version number, different product - allowed.
+    const sameNumberOtherProduct = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId: productB.data.id,
+      versionNumber: "1.0.0",
+    });
+    expect(sameNumberOtherProduct.ok).toBe(true);
+  });
+
+  test("a requirement can be tagged with software versions, but not with another product's", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, requirementId } = await createRequirement(tenant);
+    const v1 = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.0" });
+    const v2 = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.1" });
+
+    const setLinks = await rpc(tenant.cookie, "POST", "requirements.setSoftwareVersions", {
+      requirementId,
+      softwareVersionIds: [v1.data.id, v2.data.id],
+    });
+    expect(setLinks.ok).toBe(true);
+
+    const detail = await rpc(tenant.cookie, "GET", "requirements.get", { id: requirementId });
+    expect(detail.data.softwareVersions.map((v: any) => v.versionNumber).sort()).toEqual(["1.0", "1.1"]);
+
+    // A version from an unrelated product is rejected, not silently linked.
+    const otherProduct = await rpc(tenant.cookie, "POST", "products.create", { name: "Other" });
+    const otherVersion = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId: otherProduct.data.id,
+      versionNumber: "9.9",
+    });
+    const crossProduct = await rpc(tenant.cookie, "POST", "requirements.setSoftwareVersions", {
+      requirementId,
+      softwareVersionIds: [otherVersion.data.id],
+    });
+    expect(crossProduct.ok).toBe(false);
+    expect(crossProduct.error?.message).toMatch(/same product/);
+  });
+
+  test("a test case can be tagged with software versions", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId,
+      levelId: testLevel.id,
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
+      title: "TC",
+      steps: [{ description: "Step", expectedResult: "Result" }],
+    });
+    expect(testCase.ok).toBe(true);
+    const version = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "2.0" });
+
+    const setLinks = await rpc(tenant.cookie, "POST", "testCases.setSoftwareVersions", {
+      testCaseId: testCase.data.testCase.id,
+      softwareVersionIds: [version.data.id],
+    });
+    expect(setLinks.ok).toBe(true);
+
+    const detail = await rpc(tenant.cookie, "GET", "testCases.get", { id: testCase.data.testCase.id });
+    expect(detail.data.softwareVersions.map((v: any) => v.versionNumber)).toEqual(["2.0"]);
+  });
+
+  test("an OTS component version can be tagged with which release it shipped in", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    const parent = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Host item",
+    });
+    const node = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: parent.data.node.id,
+      title: "Log4j",
+      supplier: "Apache",
+      version: "2.14.1",
+    });
+    expect(node.ok).toBe(true);
+    const nodeId = node.data.node.id;
+    const currentVersionId = node.data.node.currentVersion.id;
+    const version = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.0" });
+
+    const setLinks = await rpc(tenant.cookie, "POST", "architecture.setVersionSoftwareVersions", {
+      nodeId,
+      architectureNodeVersionId: currentVersionId,
+      softwareVersionIds: [version.data.id],
+    });
+    expect(setLinks.ok).toBe(true);
+
+    const detail = await rpc(tenant.cookie, "GET", "architecture.get", { id: nodeId });
+    const currentVersionRow = detail.data.versionHistory.find((v: any) => v.id === currentVersionId);
+    expect(currentVersionRow.softwareVersions.map((v: any) => v.versionNumber)).toEqual(["1.0"]);
+
+    // A version id belonging to a different product is rejected.
+    const otherProduct = await rpc(tenant.cookie, "POST", "products.create", { name: "Other" });
+    const otherVersion = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId: otherProduct.data.id,
+      versionNumber: "9.9",
+    });
+    const crossProduct = await rpc(tenant.cookie, "POST", "architecture.setVersionSoftwareVersions", {
+      nodeId,
+      architectureNodeVersionId: currentVersionId,
+      softwareVersionIds: [otherVersion.data.id],
+    });
+    expect(crossProduct.ok).toBe(false);
+    expect(crossProduct.error?.message).toMatch(/same product/);
+  });
+
+  test('recording a new OTS component version can copy "applies to versions" links from the previous one', async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    const parent = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Host item",
+    });
+    const node = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: parent.data.node.id,
+      title: "Log4j",
+      supplier: "Apache",
+      version: "2.14.1",
+    });
+    const nodeId = node.data.node.id;
+    const oldVersionId = node.data.node.currentVersion.id;
+    const v1 = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.0" });
+    const v2 = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.1" });
+    await rpc(tenant.cookie, "POST", "architecture.setVersionSoftwareVersions", {
+      nodeId,
+      architectureNodeVersionId: oldVersionId,
+      softwareVersionIds: [v1.data.id, v2.data.id],
+    });
+
+    const bumped = await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", {
+      nodeId,
+      version: "2.15.1",
+      copyLinksFromVersionId: oldVersionId,
+    });
+    expect(bumped.ok).toBe(true);
+    const newVersionId = bumped.data.version.id;
+
+    const detail = await rpc(tenant.cookie, "GET", "architecture.get", { id: nodeId });
+    const newVersionRow = detail.data.versionHistory.find((v: any) => v.id === newVersionId);
+    expect(newVersionRow.softwareVersions.map((v: any) => v.versionNumber).sort()).toEqual(["1.0", "1.1"]);
+
+    // A snapshot, not a live link - editing the new version's tags afterward doesn't
+    // reach back and affect the old version's.
+    await rpc(tenant.cookie, "POST", "architecture.setVersionSoftwareVersions", {
+      nodeId,
+      architectureNodeVersionId: newVersionId,
+      softwareVersionIds: [v1.data.id],
+    });
+    const afterEdit = await rpc(tenant.cookie, "GET", "architecture.get", { id: nodeId });
+    const oldVersionRow = afterEdit.data.versionHistory.find((v: any) => v.id === oldVersionId);
+    expect(oldVersionRow.softwareVersions.map((v: any) => v.versionNumber).sort()).toEqual(["1.0", "1.1"]);
+
+    // Recording without copyLinksFromVersionId starts untagged, same as before this option existed.
+    const bumpedAgain = await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", { nodeId, version: "2.16.0" });
+    const detailAgain = await rpc(tenant.cookie, "GET", "architecture.get", { id: nodeId });
+    const untaggedRow = detailAgain.data.versionHistory.find((v: any) => v.id === bumpedAgain.data.version.id);
+    expect(untaggedRow.softwareVersions).toEqual([]);
+  });
+
+  test("requirements.listByProduct includes each row's tagged software versions", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, requirementId, levelId } = await createRequirement(tenant);
+    const untagged = await createRequirement(tenant, { productId });
+    const version = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.0" });
+    await rpc(tenant.cookie, "POST", "requirements.setSoftwareVersions", {
+      requirementId,
+      softwareVersionIds: [version.data.id],
+    });
+
+    const list = await rpc(tenant.cookie, "GET", "requirements.listByProduct", { productId, levelId });
+    const taggedRow = list.data.find((r: any) => r.id === requirementId);
+    const untaggedRow = list.data.find((r: any) => r.id === untagged.requirementId);
+    expect(taggedRow.softwareVersions.map((v: any) => v.versionNumber)).toEqual(["1.0"]);
+    expect(untaggedRow.softwareVersions).toEqual([]);
+  });
+
+  test("testCases.listByProduct includes each row's tagged software versions", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId,
+      levelId: testLevel.id,
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
+      title: "Tagged",
+      steps: [{ description: "Step", expectedResult: "Result" }],
+    });
+    const untagged = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId,
+      levelId: testLevel.id,
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
+      title: "Untagged",
+      steps: [{ description: "Step", expectedResult: "Result" }],
+    });
+    const version = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.0" });
+    await rpc(tenant.cookie, "POST", "testCases.setSoftwareVersions", {
+      testCaseId: testCase.data.testCase.id,
+      softwareVersionIds: [version.data.id],
+    });
+
+    const list = await rpc(tenant.cookie, "GET", "testCases.listByProduct", { productId, levelId: testLevel.id });
+    const taggedRow = list.data.find((tc: any) => tc.id === testCase.data.testCase.id);
+    const untaggedRow = list.data.find((tc: any) => tc.id === untagged.data.testCase.id);
+    expect(taggedRow.softwareVersions.map((v: any) => v.versionNumber)).toEqual(["1.0"]);
+    expect(untaggedRow.softwareVersions).toEqual([]);
+  });
+
+  test("vulnerabilities.otsSummary includes each version row's tagged software versions", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    const parent = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Host item",
+    });
+    const node = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId,
+      levelId: sw.id,
+      kind: "ots",
+      parentId: parent.data.node.id,
+      title: "Log4j",
+      supplier: "Apache",
+      version: "2.14.1",
+    });
+    const nodeId = node.data.node.id;
+    const currentVersionId = node.data.node.currentVersion.id;
+    const version = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.0" });
+    await rpc(tenant.cookie, "POST", "architecture.setVersionSoftwareVersions", {
+      nodeId,
+      architectureNodeVersionId: currentVersionId,
+      softwareVersionIds: [version.data.id],
+    });
+
+    const summary = await rpc(tenant.cookie, "GET", "vulnerabilities.otsSummary", { productId, levelId: sw.id });
+    const row = summary.data.find((r: any) => r.node.id === nodeId);
+    const versionRow = row.versions.find((v: any) => v.id === currentVersionId);
+    expect(versionRow.softwareVersions.map((v: any) => v.versionNumber)).toEqual(["1.0"]);
+  });
+
+  test("traceability.getMatrix includes each row's requirement-side and test-case-side tagged software versions", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const { productId, requirementId } = await createRequirement(tenant);
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId,
+      levelId: testLevel.id,
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
+      title: "TC",
+      steps: [{ description: "Step", expectedResult: "Result", requirementIds: [requirementId] }],
+    });
+    const reqVersion = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.0" });
+    const tcVersion = await rpc(tenant.cookie, "POST", "softwareVersions.create", { productId, versionNumber: "1.1" });
+    await rpc(tenant.cookie, "POST", "requirements.setSoftwareVersions", {
+      requirementId,
+      softwareVersionIds: [reqVersion.data.id],
+    });
+    await rpc(tenant.cookie, "POST", "testCases.setSoftwareVersions", {
+      testCaseId: testCase.data.testCase.id,
+      softwareVersionIds: [tcVersion.data.id],
+    });
+
+    const matrix = await rpc(tenant.cookie, "GET", "traceability.getMatrix", { productId });
+    const row = matrix.data.find((r: any) => r.requirementId === requirementId && r.testCaseId === testCase.data.testCase.id);
+    expect(row.requirementSoftwareVersions.map((v: any) => v.versionNumber)).toEqual(["1.0"]);
+    expect(row.testCaseSoftwareVersions.map((v: any) => v.versionNumber)).toEqual(["1.1"]);
+
+    // A requirement with no covering test case still gets a row (a coverage gap), with
+    // empty software versions on the test-case side, not a crash - reuse the level from
+    // the same product for a second, uncovered requirement.
+    const uncovered = await createRequirement(tenant, { productId, levelIndex: 0 });
+    const matrixAfter = await rpc(tenant.cookie, "GET", "traceability.getMatrix", { productId });
+    const gapRow = matrixAfter.data.find((r: any) => r.requirementId === uncovered.requirementId);
+    expect(gapRow.testCaseSoftwareVersions).toEqual([]);
+  });
+});

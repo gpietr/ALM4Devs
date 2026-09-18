@@ -11,6 +11,7 @@ import {
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
 import { ArchitecturePicker } from "@/components/architecture-picker";
+import { SoftwareVersionPicker } from "@/components/software-version-picker";
 import { RichTextEditor } from "@/components/rich-text-editor";
 import { RichTextView } from "@/components/rich-text-view";
 import { StatusPill } from "@/components/status-pill";
@@ -51,7 +52,14 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   const setArchitectureLinks = trpc.requirements.setArchitectureLinks.useMutation({
     onSuccess: () => utils.requirements.get.invalidate({ id }),
   });
+  const setSoftwareVersions = trpc.requirements.setSoftwareVersions.useMutation({
+    onSuccess: () => utils.requirements.get.invalidate({ id }),
+  });
   const architectureOptions = trpc.architecture.listAllByProduct.useQuery(
+    { productId: detail.data?.requirement.productId ?? "" },
+    { enabled: !!detail.data?.requirement.productId },
+  );
+  const softwareVersionOptions = trpc.softwareVersions.listByProduct.useQuery(
     { productId: detail.data?.requirement.productId ?? "" },
     { enabled: !!detail.data?.requirement.productId },
   );
@@ -64,6 +72,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
   const [architectureNodeIds, setArchitectureNodeIds] = useState<string[]>([]);
+  const [softwareVersionIds, setSoftwareVersionIds] = useState<string[]>([]);
 
   // Open a draft straight into the edit form (title, description, background, and
   // tenant-defined fields together). Approved/in-review land read-only; approved can
@@ -80,6 +89,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
     setBackground(latest.background ?? "");
     setCustomFieldState(customFieldFormStateFromValues(detail.data.customFieldValues));
     setArchitectureNodeIds(detail.data.architectureLinks.map((l) => l.id));
+    setSoftwareVersionIds(detail.data.softwareVersions.map((v) => v.id));
     if (latest.statusCategory === "draft") setEditing(true);
   }, [detail.data]);
 
@@ -87,7 +97,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
   if (detail.error) return <main className="mx-auto max-w-4xl px-5 py-16 text-sm text-destructive">{detail.error.message}</main>;
   if (!detail.data) return null;
 
-  const { requirement, versions, children, coveringTestCases, architectureLinks, customFieldValues } = detail.data;
+  const { requirement, versions, children, coveringTestCases, architectureLinks, customFieldValues, softwareVersions } = detail.data;
   const current = versions[0];
   if (!current) return null;
 
@@ -356,6 +366,30 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
         {setArchitectureLinks.error && (
           <p className="text-sm text-destructive">{setArchitectureLinks.error.message}</p>
         )}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <Label className="flex-col items-start gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Applies to versions</span>
+          <SoftwareVersionPicker
+            options={softwareVersionOptions.data ?? []}
+            value={softwareVersionIds}
+            onChange={setSoftwareVersionIds}
+          />
+        </Label>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={
+            setSoftwareVersions.isPending ||
+            JSON.stringify([...softwareVersionIds].sort()) === JSON.stringify(softwareVersions.map((v) => v.id).sort())
+          }
+          onClick={() => setSoftwareVersions.mutate({ requirementId: id, softwareVersionIds })}
+        >
+          {setSoftwareVersions.isPending ? "Saving…" : "Save versions"}
+        </Button>
+        {setSoftwareVersions.error && <p className="text-sm text-destructive">{setSoftwareVersions.error.message}</p>}
       </div>
 
 

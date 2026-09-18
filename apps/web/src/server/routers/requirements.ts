@@ -15,8 +15,11 @@ import {
   listArchitectureLinksForRequirement,
   listEnabledStatuses,
   listLevels,
+  listSoftwareVersionsForEntities,
+  listSoftwareVersionsForEntity,
   nextAllowedCategories,
   replaceRequirementArchitectureLinks,
+  replaceSoftwareVersionLinks,
   REQUIREMENT_STATUS_CATEGORIES,
   type RequirementStatusCategory,
   setCustomFieldValues,
@@ -198,6 +201,7 @@ export const requirementsRouter = router({
         // the product page) - one batched query for every row rather than N+1.
         const customFieldsByRequirement = await getCustomFieldValuesForEntities(tx, tenantId, "requirement", ids);
         const architectureByRequirement = await listArchitectureDisplayIdsByRequirement(tx, tenantId, ids);
+        const softwareVersionsByRequirement = await listSoftwareVersionsForEntities(tx, tenantId, "requirement", ids);
 
         return rows.map((r) => ({
           ...r,
@@ -205,6 +209,7 @@ export const requirementsRouter = router({
           coveredByCount: coveredByCount.get(r.id) ?? 0,
           architectureLinks: architectureByRequirement.get(r.id) ?? [],
           customFieldValues: customFieldsByRequirement.get(r.id) ?? [],
+          softwareVersions: softwareVersionsByRequirement.get(r.id) ?? [],
         }));
       });
     }),
@@ -277,8 +282,9 @@ export const requirementsRouter = router({
       const coveringTestCases = await getCoveringTestCases(tx, tenantId, input.id);
       const architectureLinks = await listArchitectureLinksForRequirement(tx, tenantId, input.id);
       const customFieldValues = await getCustomFieldValues(tx, tenantId, "requirement", input.id);
+      const softwareVersions = await listSoftwareVersionsForEntity(tx, tenantId, "requirement", input.id);
 
-      return { requirement, versions, children, coveringTestCases, architectureLinks, customFieldValues };
+      return { requirement, versions, children, coveringTestCases, architectureLinks, customFieldValues, softwareVersions };
     });
   }),
 
@@ -387,6 +393,34 @@ export const requirementsRouter = router({
           requirementId: input.requirementId,
           productId: owned.productId,
           architectureNodeIds: input.architectureNodeIds,
+        });
+        return { ok: true };
+      }).catch(toBadRequest);
+    }),
+
+  /** Which software versions (releases) this requirement applies to - not versioned
+   * content, same reasoning as setArchitectureLinks above. */
+  setSoftwareVersions: protectedProcedure
+    .input(
+      z.object({
+        requirementId: z.string().uuid(),
+        softwareVersionIds: z.array(z.string().uuid()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, async (tx) => {
+        const [owned] = await tx
+          .select({ id: schema.requirements.id, productId: schema.requirements.productId })
+          .from(schema.requirements)
+          .where(and(eq(schema.requirements.id, input.requirementId), eq(schema.requirements.tenantId, tenantId)));
+        if (!owned) throw new DomainError("requirement not found");
+        await replaceSoftwareVersionLinks(tx, {
+          tenantId,
+          entityType: "requirement",
+          entityId: input.requirementId,
+          productId: owned.productId,
+          softwareVersionIds: input.softwareVersionIds,
         });
         return { ok: true };
       }).catch(toBadRequest);

@@ -6,12 +6,14 @@ import {
   asCustomFieldDefinitions,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
+import { FilterChip } from "@/components/filter-chip";
 import { Frame } from "@/components/frame";
 import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
 import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
+import { type FilterDef, useListFilters } from "@/lib/list-filters";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Plus } from "lucide-react";
@@ -23,6 +25,7 @@ const BUILTIN_COLUMNS: ListColumn[] = [
   { id: "title", label: "Test case" },
   { id: "covers", label: "Covers" },
   { id: "architecture", label: "Software items", defaultVisible: false },
+  { id: "versions", label: "Versions", defaultVisible: false },
   { id: "created", label: "Created" },
 ];
 
@@ -61,6 +64,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
     { productId, levelId: levelId! },
     { enabled: !!levelId },
   );
+  const softwareVersionOptions = trpc.softwareVersions.listByProduct.useQuery({ productId });
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_case" });
   const customFields = asCustomFieldDefinitions(customFieldsQuery.data ?? []);
   const columns = useMemo<ListColumn[]>(
@@ -77,6 +81,19 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
   const search = searchParams.get("q") ?? "";
   const sortBy = searchParams.get("sortBy");
   const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
+  // Declarative filters - see list-filters.ts (same pattern as requirements-section.tsx).
+  const filterDefs = useMemo<FilterDef<NonNullable<typeof testCases.data>[number]>[]>(
+    () => [
+      {
+        id: "version",
+        label: "Version",
+        options: (softwareVersionOptions.data ?? []).map((v) => ({ value: v.id, label: v.versionNumber })),
+        matches: (tc, v) => tc.softwareVersions.some((sv) => sv.id === v),
+      },
+    ],
+    [softwareVersionOptions.data],
+  );
+  const filters = useListFilters(filterDefs);
   const columnIds = useMemo(
     () => parseColumnParam(searchParams.get("columns"), columns),
     [searchParams, columns],
@@ -94,6 +111,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
 
   const visibleTestCases = useMemo(() => {
     let rows = testCases.data ?? [];
+    rows = filters.applyFilters(rows);
     if (search.trim()) {
       const needle = search.trim().toLowerCase();
       rows = rows.filter((tc) => tc.title.toLowerCase().includes(needle));
@@ -102,7 +120,8 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
       rows = [...rows].sort((a, b) => compareTestCases(a, b, sortBy) * (sortDir === "desc" ? -1 : 1));
     }
     return rows;
-  }, [testCases.data, search, sortBy, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testCases.data, filters.active, search, sortBy, sortDir]);
 
   // Bulk selection for "generate a report per selected test case, zipped" (backlog item
   // 9.32) - independent of the filters above (a selected row stays selected if it's
@@ -159,8 +178,19 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
           </div>
-          {search && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setParams({ q: undefined })}>
+          {filterDefs.map((def) => (
+            <FilterChip key={def.id} def={def} value={filters.active[def.id]} onChange={(v) => filters.setFilter(def.id, v)} />
+          ))}
+          {(filters.hasActive || search) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                filters.clearAll();
+                setParams({ q: undefined });
+              }}
+            >
               Clear filters
             </Button>
           )}
@@ -206,6 +236,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                   <SortableTableHead label="Covers" sortKey="covers" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[130px]" />
                 )}
                 {visible.has("architecture") && <TableHead className="w-[160px]">Architecture</TableHead>}
+                {visible.has("versions") && <TableHead className="w-[140px]">Versions</TableHead>}
                 {visible.has("created") && (
                   <SortableTableHead label="Created" sortKey="created" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[110px]" />
                 )}
@@ -261,6 +292,11 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                   {visible.has("architecture") && (
                     <TableCell className="max-w-[160px] truncate font-mono text-[12.5px] text-muted-foreground">
                       {tc.architectureLinks.length > 0 ? tc.architectureLinks.join(", ") : "—"}
+                    </TableCell>
+                  )}
+                  {visible.has("versions") && (
+                    <TableCell className="max-w-[140px] truncate text-[12.5px] text-muted-foreground">
+                      {tc.softwareVersions.length > 0 ? tc.softwareVersions.map((v) => v.versionNumber).join(", ") : "—"}
                     </TableCell>
                   )}
                   {visible.has("created") && (

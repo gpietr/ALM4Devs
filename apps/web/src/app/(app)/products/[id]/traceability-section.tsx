@@ -5,6 +5,7 @@ import {
   asCustomFieldDefinitions,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
+import { FilterChip } from "@/components/filter-chip";
 import { Frame } from "@/components/frame";
 import { ResultBadge } from "@/components/result-badge";
 import { SortableTableHead } from "@/components/sortable-table-head";
@@ -14,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
 import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
+import { type FilterDef, useListFilters } from "@/lib/list-filters";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Download } from "lucide-react";
@@ -31,6 +33,8 @@ const BUILTIN_COLUMNS: ListColumn[] = [
   { id: "testCase", label: "Test Case" },
   { id: "lastExecution", label: "Last Execution" },
   { id: "status", label: "Status" },
+  { id: "reqVersions", label: "Req: Versions", defaultVisible: false },
+  { id: "tcVersions", label: "TC: Versions", defaultVisible: false },
 ];
 
 interface MatrixRow {
@@ -89,6 +93,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
   const tcCustomFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_case" });
   const reqCustomFields = asCustomFieldDefinitions(reqCustomFieldsQuery.data ?? []);
   const tcCustomFields = asCustomFieldDefinitions(tcCustomFieldsQuery.data ?? []);
+  const softwareVersionOptions = trpc.softwareVersions.listByProduct.useQuery({ productId });
 
   // Same URL-driven filter/sort pattern as requirements-section.tsx - see its comment and
   // use-url-state.ts. The exported CSV always reflects the *filtered, sorted* rows - if
@@ -122,6 +127,25 @@ export function TraceabilitySection({ productId }: { productId: string }) {
   const visibleReqFields = useMemo(() => reqCustomFields.filter((f) => visible.has(f.id)), [reqCustomFields, visible]);
   const visibleTcFields = useMemo(() => tcCustomFields.filter((f) => visible.has(f.id)), [tcCustomFields, visible]);
 
+  // Declarative filters - see list-filters.ts. Matches either side of the row (the
+  // requirement's own tags, or its covering test case's) - a reviewer filtering by
+  // release wants every row touching it, not two separate filters to run one after
+  // another. Kept independent of the existing hand-rolled status filter above, which
+  // stays as-is.
+  const filterDefs = useMemo<FilterDef<NonNullable<typeof matrix.data>[number]>[]>(
+    () => [
+      {
+        id: "version",
+        label: "Version",
+        options: (softwareVersionOptions.data ?? []).map((v) => ({ value: v.id, label: v.versionNumber })),
+        matches: (row, v) =>
+          row.requirementSoftwareVersions.some((sv) => sv.id === v) || row.testCaseSoftwareVersions.some((sv) => sv.id === v),
+      },
+    ],
+    [softwareVersionOptions.data],
+  );
+  const filters = useListFilters(filterDefs);
+
   function onSort(key: string) {
     if (sortBy === key) setParams({ sortDir: sortDir === "asc" ? "desc" : "asc" });
     else setParams({ sortBy: key, sortDir: "asc" });
@@ -130,6 +154,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
   const visibleRows = useMemo(() => {
     let rows = matrix.data ?? [];
     if (statusFilter !== ANY) rows = rows.filter((r) => matchesStatusFilter(r, statusFilter));
+    rows = filters.applyFilters(rows);
     if (search.trim()) {
       const needle = search.trim().toLowerCase();
       rows = rows.filter(
@@ -140,7 +165,8 @@ export function TraceabilitySection({ productId }: { productId: string }) {
       rows = [...rows].sort((a, b) => compareMatrixRows(a, b, sortBy) * (sortDir === "desc" ? -1 : 1));
     }
     return rows;
-  }, [matrix.data, statusFilter, search, sortBy, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matrix.data, statusFilter, filters.active, search, sortBy, sortDir]);
 
   function exportCsv() {
     const header = [
@@ -152,6 +178,8 @@ export function TraceabilitySection({ productId }: { productId: string }) {
       "Last Execution",
       "Environment",
       "Status",
+      ...(visible.has("reqVersions") ? ["Req: Versions"] : []),
+      ...(visible.has("tcVersions") ? ["TC: Versions"] : []),
       ...visibleReqFields.map((f) => `Req: ${f.name}`),
       ...visibleTcFields.map((f) => `TC: ${f.name}`),
     ];
@@ -164,6 +192,8 @@ export function TraceabilitySection({ productId }: { productId: string }) {
       r.lastExecutionStartedAt ? new Date(r.lastExecutionStartedAt).toLocaleString() : "",
       r.lastExecutionEnvironmentName ?? "",
       r.lastExecutionStatus ?? (r.testCaseId ? "Not run" : ""),
+      ...(visible.has("reqVersions") ? [r.requirementSoftwareVersions.map((v) => v.versionNumber).join(", ")] : []),
+      ...(visible.has("tcVersions") ? [r.testCaseSoftwareVersions.map((v) => v.versionNumber).join(", ")] : []),
       ...visibleReqFields.map((f) =>
         formatCustomFieldValue(
           r.requirementCustomFieldValues.find((v) => v.fieldId === f.id) ?? { fieldType: f.fieldType, value: null, optionLabel: null },
@@ -233,8 +263,19 @@ export function TraceabilitySection({ productId }: { productId: string }) {
               <SelectItem value="in_progress">In progress</SelectItem>
             </SelectContent>
           </Select>
-          {(statusFilter !== ANY || search) && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setParams({ status: undefined, q: undefined })}>
+          {filterDefs.map((def) => (
+            <FilterChip key={def.id} def={def} value={filters.active[def.id]} onChange={(v) => filters.setFilter(def.id, v)} />
+          ))}
+          {(statusFilter !== ANY || search || filters.hasActive) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                filters.clearAll();
+                setParams({ status: undefined, q: undefined });
+              }}
+            >
               Clear filters
             </Button>
           )}
@@ -299,6 +340,8 @@ export function TraceabilitySection({ productId }: { productId: string }) {
                     className="w-28"
                   />
                 )}
+                {visible.has("reqVersions") && <TableHead className="w-[140px]">Req: Versions</TableHead>}
+                {visible.has("tcVersions") && <TableHead className="w-[140px]">TC: Versions</TableHead>}
                 {visibleReqFields.map((f) => (
                   <TableHead key={f.id}>Req: {f.name}</TableHead>
                 ))}
@@ -377,6 +420,20 @@ export function TraceabilitySection({ productId }: { productId: string }) {
                   {visible.has("status") && (
                     <TableCell>
                       {row.lastExecutionStatus ? <ResultBadge status={row.lastExecutionStatus} /> : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                  )}
+                  {visible.has("reqVersions") && (
+                    <TableCell className="max-w-[140px] truncate text-[12.5px] text-muted-foreground">
+                      {row.requirementSoftwareVersions.length > 0
+                        ? row.requirementSoftwareVersions.map((v) => v.versionNumber).join(", ")
+                        : "—"}
+                    </TableCell>
+                  )}
+                  {visible.has("tcVersions") && (
+                    <TableCell className="max-w-[140px] truncate text-[12.5px] text-muted-foreground">
+                      {row.testCaseSoftwareVersions.length > 0
+                        ? row.testCaseSoftwareVersions.map((v) => v.versionNumber).join(", ")
+                        : "—"}
                     </TableCell>
                   )}
                   {visibleReqFields.map((f) => (

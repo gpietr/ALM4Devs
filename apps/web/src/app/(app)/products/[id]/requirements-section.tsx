@@ -8,6 +8,7 @@ import {
   toCustomFieldValuesInput,
 } from "@/components/custom-fields";
 import { ColumnPicker } from "@/components/column-picker";
+import { FilterChip } from "@/components/filter-chip";
 import { Frame } from "@/components/frame";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
 import { SortableTableHead } from "@/components/sortable-table-head";
@@ -20,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { formatItemId } from "@/lib/format-item-id";
 import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
+import { type FilterDef, useListFilters } from "@/lib/list-filters";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Plus } from "lucide-react";
@@ -34,8 +36,6 @@ const RichTextEditor = dynamic(
   { ssr: false, loading: () => <p className="text-sm text-muted-foreground">Loading editor…</p> },
 );
 
-const ANY = "any";
-
 const BUILTIN_COLUMNS: ListColumn[] = [
   { id: "id", label: "ID", required: true },
   { id: "title", label: "Requirement" },
@@ -44,6 +44,7 @@ const BUILTIN_COLUMNS: ListColumn[] = [
   { id: "traces", label: "Traces to" },
   { id: "coverage", label: "Coverage" },
   { id: "architecture", label: "Software items", defaultVisible: false },
+  { id: "versions", label: "Versions", defaultVisible: false },
 ];
 
 interface SortableRequirement {
@@ -97,6 +98,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   );
 
   const statuses = trpc.requirements.listStatuses.useQuery();
+  const softwareVersionOptions = trpc.softwareVersions.listByProduct.useQuery({ productId });
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "requirement" });
   const customFields = useMemo(() => asCustomFieldDefinitions(customFieldsQuery.data ?? []), [customFieldsQuery.data]);
   // Tenant-defined fields are ordinary columns in the same picker as ID/title/status -
@@ -133,10 +135,29 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   // - the whole level's requirements come back in one call already), rather than pushing
   // these as query params to the backend.
   const { searchParams, setParams } = useUrlState();
-  const statusFilter = searchParams.get("status") ?? ANY;
   const search = searchParams.get("q") ?? "";
   const sortBy = searchParams.get("sortBy");
   const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
+  // Declarative filters - see list-filters.ts. Adding a third filter later is one more
+  // entry here, not a new Select/matching-logic block.
+  const filterDefs = useMemo<FilterDef<NonNullable<typeof requirements.data>[number]>[]>(
+    () => [
+      {
+        id: "status",
+        label: "Status",
+        options: (statuses.data ?? []).map((s) => ({ value: s.name, label: s.name })),
+        matches: (r, v) => r.statusName === v,
+      },
+      {
+        id: "version",
+        label: "Version",
+        options: (softwareVersionOptions.data ?? []).map((v) => ({ value: v.id, label: v.versionNumber })),
+        matches: (r, v) => r.softwareVersions.some((sv) => sv.id === v),
+      },
+    ],
+    [statuses.data, softwareVersionOptions.data],
+  );
+  const filters = useListFilters(filterDefs);
   const columnIds = useMemo(
     () => parseColumnParam(searchParams.get("columns"), columns),
     [searchParams, columns],
@@ -154,7 +175,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
 
   const visibleRequirements = useMemo(() => {
     let rows = requirements.data ?? [];
-    if (statusFilter !== ANY) rows = rows.filter((r) => r.statusName === statusFilter);
+    rows = filters.applyFilters(rows);
     if (search.trim()) {
       const needle = search.trim().toLowerCase();
       rows = rows.filter((r) => r.title.toLowerCase().includes(needle));
@@ -163,7 +184,8 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
       rows = [...rows].sort((a, b) => compareRequirements(a, b, sortBy) * (sortDir === "desc" ? -1 : 1));
     }
     return rows;
-  }, [requirements.data, statusFilter, search, sortBy, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requirements.data, filters.active, search, sortBy, sortDir]);
 
   // Every number here comes from data already fetched above - no new endpoint.
   const summary = useMemo(() => {
@@ -292,21 +314,19 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
           </div>
-          <FilterSelect
-            label="Status"
-            value={statusFilter}
-            active={statusFilter !== ANY}
-            onValueChange={(v) => setParams({ status: v === ANY ? undefined : (v ?? undefined) })}
-          >
-            <SelectItem value={ANY}>All</SelectItem>
-            {statuses.data?.map((s) => (
-              <SelectItem key={s.id} value={s.name}>
-                {s.name}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          {(statusFilter !== ANY || search) && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setParams({ status: undefined, q: undefined })}>
+          {filterDefs.map((def) => (
+            <FilterChip key={def.id} def={def} value={filters.active[def.id]} onChange={(v) => filters.setFilter(def.id, v)} />
+          ))}
+          {(filters.hasActive || search) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                filters.clearAll();
+                setParams({ q: undefined });
+              }}
+            >
               Clear filters
             </Button>
           )}
@@ -340,6 +360,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                   <SortableTableHead label="Coverage" sortKey="covered" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[150px]" />
                 )}
                 {visible.has("architecture") && <TableHead className="w-[160px]">Architecture</TableHead>}
+                {visible.has("versions") && <TableHead className="w-[140px]">Versions</TableHead>}
                 {visibleCustomFields.map((f) => (
                   <TableHead key={f.id}>{f.name}</TableHead>
                 ))}
@@ -407,6 +428,11 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                         {r.architectureLinks.length > 0 ? r.architectureLinks.join(", ") : "—"}
                       </TableCell>
                     )}
+                    {visible.has("versions") && (
+                      <TableCell className="max-w-[140px] truncate text-[12.5px] text-muted-foreground">
+                        {r.softwareVersions.length > 0 ? r.softwareVersions.map((v) => v.versionNumber).join(", ") : "—"}
+                      </TableCell>
+                    )}
                     {visibleCustomFields.map((f) => (
                       <TableCell key={f.id} className="text-muted-foreground">
                         {formatCustomFieldValue(
@@ -447,40 +473,6 @@ function SummaryCell({ label, value, of, last }: { label: string; value: number;
         </div>
       )}
     </div>
-  );
-}
-
-/** A Select restyled as the handoff's filter chip - "Status: All" with the trigger's own
- * chevron, or (once a real filter is applied) an accent border/tint fill/tinted text.
- * `label` is a static prefix (`Status:`), not part of the Select's own value. */
-function FilterSelect({
-  label,
-  value,
-  active,
-  onValueChange,
-  children,
-}: {
-  label: string;
-  value: string;
-  active: boolean;
-  onValueChange: (v: string | null) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger
-        className={
-          active
-            ? "gap-1.5 border-primary bg-[rgba(89,128,166,.12)] px-2.5 py-[5px] text-sm text-[#2c455d]"
-            : "gap-1.5 border-border bg-card px-2.5 py-[5px] text-sm text-muted-foreground"
-        }
-      >
-        <span>
-          {label}: <span className={active ? "font-medium" : "font-medium text-foreground"}>{value === ANY ? "All" : value}</span>
-        </span>
-      </SelectTrigger>
-      <SelectContent>{children}</SelectContent>
-    </Select>
   );
 }
 

@@ -1,9 +1,12 @@
 import { db } from "@/lib/db";
 import {
+  getArchitectureNode,
   getNvdConnection,
   getOtsSummaryForProduct,
   getVulnerabilitiesForNode,
+  listSoftwareVersionsForEntity,
   recordArchitectureNodeVersion,
+  replaceSoftwareVersionLinks,
   saveNvdConnection,
   setVulnerabilityAnnotation,
 } from "@galm/core";
@@ -79,20 +82,44 @@ export const vulnerabilitiesRouter = router({
         nodeId: z.string().uuid(),
         version: z.string().trim().min(1).max(100),
         cpe: z.string().trim().max(500).optional(),
+        // When set, the new version starts tagged with the same "applies to software
+        // versions" links as this earlier version, instead of starting untagged - a
+        // component version bump (e.g. Log4j 2.14.1 -> 2.15.1) usually still ships in the
+        // same set of releases until proven otherwise, so this saves re-tagging by hand
+        // every time. Copies a snapshot, not a live reference - editing one version's
+        // tags afterward never affects the other's.
+        copyLinksFromVersionId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
       const userId = userIdOf(ctx);
-      return withTenant(db, tenantId, (tx) =>
-        recordArchitectureNodeVersion(tx, {
+      return withTenant(db, tenantId, async (tx) => {
+        const newVersion = await recordArchitectureNodeVersion(tx, {
           tenantId,
           architectureNodeId: input.nodeId,
           version: input.version,
           cpe: input.cpe,
           createdBy: userId,
-        }),
-      ).catch(toBadRequest);
+        });
+        if (input.copyLinksFromVersionId) {
+          const { node } = await getArchitectureNode(tx, tenantId, input.nodeId);
+          const links = await listSoftwareVersionsForEntity(
+            tx,
+            tenantId,
+            "architecture_node_version",
+            input.copyLinksFromVersionId,
+          );
+          await replaceSoftwareVersionLinks(tx, {
+            tenantId,
+            entityType: "architecture_node_version",
+            entityId: newVersion.version.id,
+            productId: node.productId,
+            softwareVersionIds: links.map((l) => l.id),
+          });
+        }
+        return newVersion;
+      }).catch(toBadRequest);
     }),
 
   scanNode: protectedProcedure

@@ -16,6 +16,7 @@ export * from "./requirement-levels";
 export * from "./requirement-status";
 export * from "./requirements";
 export * from "./rich-text";
+export * from "./software-versions";
 export * from "./spira-connection";
 export * from "./status-admin";
 export * from "./tenant-settings";

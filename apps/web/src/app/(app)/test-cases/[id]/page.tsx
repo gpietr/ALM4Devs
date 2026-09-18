@@ -14,6 +14,7 @@ import { GenerateDocumentButton } from "@/components/generate-document-button";
 import { ContextRail } from "@/components/context-rail";
 import { ArchitecturePicker } from "@/components/architecture-picker";
 import { RequirementPicker } from "@/components/requirement-picker";
+import { SoftwareVersionPicker } from "@/components/software-version-picker";
 import { emptyStep, type StepDraft, TestStepsEditor } from "@/components/test-steps-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +70,10 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     { productId: detail.data?.testCase.productId ?? "" },
     { enabled: !!detail.data },
   );
+  const softwareVersionOptions = trpc.softwareVersions.listByProduct.useQuery(
+    { productId: detail.data?.testCase.productId ?? "" },
+    { enabled: !!detail.data },
+  );
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_case" });
   const customFieldDefs = asCustomFieldDefinitions(customFieldsQuery.data ?? []);
   const updateTestCase = trpc.testCases.update.useMutation({
@@ -113,10 +118,14 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     },
   });
   const deleteTestCase = trpc.testCases.delete.useMutation();
+  const setSoftwareVersions = trpc.testCases.setSoftwareVersions.useMutation({
+    onSuccess: () => utils.testCases.get.invalidate({ id }),
+  });
 
   const [title, setTitle] = useState("");
   const [requirementIds, setRequirementIds] = useState<string[]>([]);
   const [architectureNodeIds, setArchitectureNodeIds] = useState<string[]>([]);
+  const [softwareVersionIds, setSoftwareVersionIds] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepDraft[]>([emptyStep()]);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
   const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
@@ -167,6 +176,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
       detail.data.architectureLinks.map((l) => l.id),
       detail.data.customFieldValues,
     );
+    setSoftwareVersionIds(detail.data.softwareVersions.map((v) => v.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data]);
 
@@ -214,7 +224,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     return <p className="p-10 text-sm text-destructive">{detail.error?.message}</p>;
   }
 
-  const { testCase, effectiveRequirementLinks, executions } = detail.data;
+  const { testCase, effectiveRequirementLinks, executions, softwareVersions } = detail.data;
   const levelName = levels.data?.find((l) => l.id === testCase.levelId)?.name ?? "Test Cases";
   const displayId = formatItemId(testCase.levelCode, testCase.sequenceNumber);
 
@@ -318,6 +328,30 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
               onChange={setArchitectureNodeIds}
             />
           </Label>
+
+          <div className="space-y-2">
+            <Label className="flex-col items-start gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Applies to versions</span>
+              <SoftwareVersionPicker
+                options={softwareVersionOptions.data ?? []}
+                value={softwareVersionIds}
+                onChange={setSoftwareVersionIds}
+              />
+            </Label>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={
+                setSoftwareVersions.isPending ||
+                JSON.stringify([...softwareVersionIds].sort()) === JSON.stringify(softwareVersions.map((v) => v.id).sort())
+              }
+              onClick={() => setSoftwareVersions.mutate({ testCaseId: id, softwareVersionIds })}
+            >
+              {setSoftwareVersions.isPending ? "Saving…" : "Save versions"}
+            </Button>
+            {setSoftwareVersions.error && <p className="text-sm text-destructive">{setSoftwareVersions.error.message}</p>}
+          </div>
 
           <div>
             <div className="mb-2 flex items-center justify-between">

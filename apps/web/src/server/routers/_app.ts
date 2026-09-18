@@ -5,6 +5,7 @@ import { architectureRouter } from "./architecture";
 import { productsRouter } from "./products";
 import { requirementsRouter } from "./requirements";
 import { settingsRouter } from "./settings";
+import { softwareVersionsRouter } from "./software-versions";
 import { spiraImportRouter } from "./spira-import";
 import { testCasesRouter } from "./test-cases";
 import { traceabilityRouter } from "./traceability";
@@ -25,6 +26,7 @@ export const appRouter = router({
   products: productsRouter,
   requirements: requirementsRouter,
   settings: settingsRouter,
+  softwareVersions: softwareVersionsRouter,
   testCases: testCasesRouter,
   spiraImport: spiraImportRouter,
   traceability: traceabilityRouter,

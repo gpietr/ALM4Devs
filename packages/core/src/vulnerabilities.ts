@@ -2,6 +2,7 @@ import { type TenantTx, schema } from "@galm/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getArchitectureNode } from "./architecture";
 import { DomainError } from "./errors";
+import { listSoftwareVersionsForEntities, type SoftwareVersionLinkView } from "./software-versions";
 
 /** What's needed to build an NVD search query for an OTS node - a subset of
  * ArchitectureNodeView, kept minimal so this stays a pure function callers can test
@@ -279,6 +280,7 @@ export interface OtsVersionSummary {
   isCurrent: boolean;
   latestScan: (typeof schema.vulnerabilityScans.$inferSelect) | null;
   counts: { total: number; new: number; confirmed: number; notApplicable: number; falsePositive: number };
+  softwareVersions: SoftwareVersionLinkView[];
 }
 
 function emptyOtsCounts() {
@@ -384,6 +386,15 @@ export async function getOtsSummaryForProduct(db: TenantTx, tenantId: string, pr
     versionsByNode.set(v.architectureNodeId, list);
   }
 
+  // "Applies to versions" tags per OTS component version - same batched lookup the list
+  // pages for requirements/test cases use, for the OTS view's own Versions column/filter.
+  const softwareVersionsByVersion = await listSoftwareVersionsForEntities(
+    db,
+    tenantId,
+    "architecture_node_version",
+    versionRows.map((v) => v.id),
+  );
+
   return nodeRows
     .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
     .map((node) => {
@@ -395,6 +406,7 @@ export async function getOtsSummaryForProduct(db: TenantTx, tenantId: string, pr
         isCurrent: v.id === node.currentVersionId,
         latestScan: latestScanByNodeVersion.get(`${node.id}:${v.id}`) ?? null,
         counts: countsByNodeVersion.get(`${node.id}:${v.id}`) ?? emptyOtsCounts(),
+        softwareVersions: softwareVersionsByVersion.get(v.id) ?? [],
       }));
       return {
         node: { id: node.id, title: node.title, supplier: node.supplier, sequenceNumber: node.sequenceNumber },

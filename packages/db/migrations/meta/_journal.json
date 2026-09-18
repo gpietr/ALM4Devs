@@ -162,6 +162,13 @@
       "when": 1789740000000,
       "tag": "0023_vulnerability_annotations_assessed_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789750000000,
+      "tag": "0024_software_versions",
+      "breakpoints": true
     }
   ]
 }

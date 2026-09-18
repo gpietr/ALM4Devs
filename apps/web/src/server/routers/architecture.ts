@@ -4,10 +4,13 @@ import {
   createArchitectureNode,
   deleteArchitectureNode,
   getArchitectureNode,
+  getArchitectureNodeVersion,
   listAllByProduct,
   listArchitectureLevels,
   listArchitectureTrace,
+  listSoftwareVersionsForEntity,
   listTree,
+  replaceSoftwareVersionLinks,
   updateArchitectureNode,
 } from "@galm/core";
 import { withTenant } from "@galm/db";
@@ -63,7 +66,19 @@ export const architectureRouter = router({
 
   get: protectedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
     const tenantId = tenantOf(ctx);
-    return withTenant(db, tenantId, (tx) => getArchitectureNode(tx, tenantId, input.id)).catch((err) => {
+    return withTenant(db, tenantId, async (tx) => {
+      const result = await getArchitectureNode(tx, tenantId, input.id);
+      // Each OTS version's own "applies to which release" tags - a small, per-node list
+      // (a handful of versions at most), so a plain per-row lookup rather than a batched
+      // join is simplest here.
+      const versionHistory = await Promise.all(
+        result.versionHistory.map(async (v) => ({
+          ...v,
+          softwareVersions: await listSoftwareVersionsForEntity(tx, tenantId, "architecture_node_version", v.id),
+        })),
+      );
+      return { ...result, versionHistory };
+    }).catch((err) => {
       throw new TRPCError({ code: "NOT_FOUND", message: err instanceof Error ? err.message : undefined });
     });
   }),
@@ -130,6 +145,34 @@ export const architectureRouter = router({
           actorUserId: userId,
         }),
       ).catch(toBadRequest);
+    }),
+
+  /** Which software versions (releases) shipped with this exact OTS component version -
+   * e.g. "the app shipped with Log4j 2.14.1 in v1.0". Not folded into the node's own
+   * `update` since a version row is otherwise immutable (see recordVersion) - this is a
+   * separate, editable tag on it. */
+  setVersionSoftwareVersions: protectedProcedure
+    .input(
+      z.object({
+        nodeId: z.string().uuid(),
+        architectureNodeVersionId: z.string().uuid(),
+        softwareVersionIds: z.array(z.string().uuid()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, async (tx) => {
+        const { node } = await getArchitectureNode(tx, tenantId, input.nodeId);
+        await getArchitectureNodeVersion(tx, tenantId, input.nodeId, input.architectureNodeVersionId);
+        await replaceSoftwareVersionLinks(tx, {
+          tenantId,
+          entityType: "architecture_node_version",
+          entityId: input.architectureNodeVersionId,
+          productId: node.productId,
+          softwareVersionIds: input.softwareVersionIds,
+        });
+        return { ok: true };
+      }).catch(toBadRequest);
     }),
 
   delete: protectedProcedure

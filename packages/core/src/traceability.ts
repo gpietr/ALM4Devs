@@ -1,6 +1,7 @@
 import { type TenantTx, schema } from "@galm/db";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { type CustomFieldValueView, getCustomFieldValuesForEntities } from "./custom-fields";
+import { listSoftwareVersionsForEntities, type SoftwareVersionLinkView } from "./software-versions";
 
 export interface TraceabilityRow {
   requirementId: string;
@@ -22,6 +23,11 @@ export interface TraceabilityRow {
    * other test-case-side column already being null here. */
   requirementCustomFieldValues: CustomFieldValueView[];
   testCaseCustomFieldValues: CustomFieldValueView[];
+  /** Which software versions (releases) each side of this row is tagged with - for the
+   * matrix's Versions columns/filter. Same "empty, not null" rule as the test-case-side
+   * custom field values above when there's no covering test case. */
+  requirementSoftwareVersions: SoftwareVersionLinkView[];
+  testCaseSoftwareVersions: SoftwareVersionLinkView[];
 }
 
 /**
@@ -95,12 +101,17 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
           .where(inArray(schema.testCases.id, allTestCaseIds));
   const testCaseById = new Map(testCases.map((tc) => [tc.id, tc]));
 
-  const [requirementCustomFieldsById, testCaseCustomFieldsById] = await Promise.all([
-    getCustomFieldValuesForEntities(db, tenantId, "requirement", requirementIds),
-    allTestCaseIds.length
-      ? getCustomFieldValuesForEntities(db, tenantId, "test_case", allTestCaseIds)
-      : Promise.resolve(new Map<string, CustomFieldValueView[]>()),
-  ]);
+  const [requirementCustomFieldsById, testCaseCustomFieldsById, requirementSoftwareVersionsById, testCaseSoftwareVersionsById] =
+    await Promise.all([
+      getCustomFieldValuesForEntities(db, tenantId, "requirement", requirementIds),
+      allTestCaseIds.length
+        ? getCustomFieldValuesForEntities(db, tenantId, "test_case", allTestCaseIds)
+        : Promise.resolve(new Map<string, CustomFieldValueView[]>()),
+      listSoftwareVersionsForEntities(db, tenantId, "requirement", requirementIds),
+      allTestCaseIds.length
+        ? listSoftwareVersionsForEntities(db, tenantId, "test_case", allTestCaseIds)
+        : Promise.resolve(new Map<string, SoftwareVersionLinkView[]>()),
+    ]);
 
   const executions =
     allTestCaseIds.length === 0
@@ -142,6 +153,8 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
         lastExecutionEnvironmentName: null,
         requirementCustomFieldValues: requirementCustomFieldsById.get(req.id) ?? [],
         testCaseCustomFieldValues: [],
+        requirementSoftwareVersions: requirementSoftwareVersionsById.get(req.id) ?? [],
+        testCaseSoftwareVersions: [],
       });
       continue;
     }
@@ -163,6 +176,8 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
         lastExecutionEnvironmentName: lastExecution?.environmentName ?? null,
         requirementCustomFieldValues: requirementCustomFieldsById.get(req.id) ?? [],
         testCaseCustomFieldValues: testCaseCustomFieldsById.get(testCaseId) ?? [],
+        requirementSoftwareVersions: requirementSoftwareVersionsById.get(req.id) ?? [],
+        testCaseSoftwareVersions: testCaseSoftwareVersionsById.get(testCaseId) ?? [],
       });
     }
   }

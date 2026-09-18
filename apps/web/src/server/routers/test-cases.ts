@@ -17,8 +17,11 @@ import {
   listEnvironments,
   listEvidenceForStepExecution,
   listRequirementsForStepSuggestions,
+  listSoftwareVersionsForEntities,
+  listSoftwareVersionsForEntity,
   listTestLevels,
   recordStepResult,
+  replaceSoftwareVersionLinks,
   replaceTestCaseArchitectureLinks,
   sanitizeRichText,
   startExecution,
@@ -157,6 +160,7 @@ export const testCasesRouter = router({
         // the product page) - one batched query for every row rather than N+1.
         const customFieldsByTestCase = await getCustomFieldValuesForEntities(tx, tenantId, "test_case", ids);
         const architectureByTestCase = await listArchitectureDisplayIdsByTestCase(tx, tenantId, ids);
+        const softwareVersionsByTestCase = await listSoftwareVersionsForEntities(tx, tenantId, "test_case", ids);
 
         return rows.map((r) => ({
           ...r,
@@ -164,6 +168,7 @@ export const testCasesRouter = router({
           coversCount: coversCount.get(r.id) ?? 0,
           architectureLinks: architectureByTestCase.get(r.id) ?? [],
           customFieldValues: customFieldsByTestCase.get(r.id) ?? [],
+          softwareVersions: softwareVersionsByTestCase.get(r.id) ?? [],
         }));
       });
     }),
@@ -223,6 +228,7 @@ export const testCasesRouter = router({
 
       const customFieldValues = await getCustomFieldValues(tx, tenantId, "test_case", input.id);
       const architectureLinks = await listArchitectureLinksForTestCase(tx, tenantId, input.id);
+      const softwareVersions = await listSoftwareVersionsForEntity(tx, tenantId, "test_case", input.id);
 
       return {
         testCase: { ...testCase, levelCode: level.code },
@@ -232,6 +238,7 @@ export const testCasesRouter = router({
         architectureLinks,
         executions,
         customFieldValues,
+        softwareVersions,
       };
     });
   }),
@@ -297,6 +304,36 @@ export const testCasesRouter = router({
           });
         }
         return result;
+      }).catch(toBadRequest);
+    }),
+
+  /** Which software versions (releases) this test case applies to - a separate mutation
+   * rather than folding into `update` above, same reasoning as requirements'
+   * setSoftwareVersions (not versioned content, kept independent of the steps/title
+   * dirty-tracking save flow). */
+  setSoftwareVersions: protectedProcedure
+    .input(
+      z.object({
+        testCaseId: z.string().uuid(),
+        softwareVersionIds: z.array(z.string().uuid()),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      return withTenant(db, tenantId, async (tx) => {
+        const [owned] = await tx
+          .select({ id: schema.testCases.id, productId: schema.testCases.productId })
+          .from(schema.testCases)
+          .where(and(eq(schema.testCases.id, input.testCaseId), eq(schema.testCases.tenantId, tenantId)));
+        if (!owned) throw new TRPCError({ code: "NOT_FOUND" });
+        await replaceSoftwareVersionLinks(tx, {
+          tenantId,
+          entityType: "test_case",
+          entityId: input.testCaseId,
+          productId: owned.productId,
+          softwareVersionIds: input.softwareVersionIds,
+        });
+        return { ok: true };
       }).catch(toBadRequest);
     }),
 
