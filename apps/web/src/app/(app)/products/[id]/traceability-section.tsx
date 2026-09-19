@@ -5,12 +5,12 @@ import {
   asCustomFieldDefinitions,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
+import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { FilterChip } from "@/components/filter-chip";
 import { Frame } from "@/components/frame";
 import { ResultBadge } from "@/components/result-badge";
 import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
@@ -243,11 +243,11 @@ export function TraceabilitySection({ productId }: { productId: string }) {
 
       {!!matrix.data?.length && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Input
+          <DebouncedSearchInput
             value={search}
-            onChange={(e) => setParams({ q: e.target.value || undefined })}
+            onChange={(v) => setParams({ q: v || undefined })}
             placeholder="Search requirement or test case..."
-            className="h-8 w-64"
+            className="h-8 w-64 rounded-none border border-input bg-card px-2.5 py-1 text-sm outline-none placeholder:text-muted-foreground hover:border-foreground/45"
           />
           <Select value={statusFilter} onValueChange={(v) => setParams({ status: v === ANY ? undefined : (v ?? undefined) })}>
             <SelectTrigger className="h-8">

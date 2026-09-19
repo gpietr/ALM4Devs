@@ -269,6 +269,12 @@ export const requirements = pgTable("requirements", {
   // write path that bypasses it can never silently produce two requirements answering to
   // the same human-readable id.
   unique().on(t.productId, t.levelId, t.sequenceNumber),
+  // Every list/matrix query joins requirement_versions back onto this column (current
+  // content lives on the version, not the requirement row) - without an index here, the
+  // planner has no cheap way to satisfy that join from either direction and (confirmed
+  // via EXPLAIN ANALYZE under RLS at ~2,000 rows) can fall back to a nested loop that
+  // rescans this table per version row - 12.6s instead of ~50ms for the same query.
+  index("requirements_current_version_id_idx").on(t.currentVersionId),
 ]);
 
 export const requirementVersions = pgTable("requirement_versions", {
@@ -793,6 +799,10 @@ export const architectureNodes = pgTable(
     // level - both scan this table by parentId on a hot path, so unlike most FKs in this
     // schema it's worth indexing explicitly rather than relying on a sequential scan.
     index("architecture_nodes_parent_id_idx").on(t.parentId),
+    // Same reasoning as requirements_current_version_id_idx (schema.ts, requirements
+    // table) - any query joining architecture_node_versions back onto this column is
+    // exposed to the same missing-index nested-loop trap under RLS.
+    index("architecture_nodes_current_version_id_idx").on(t.currentVersionId),
   ],
 );
 

@@ -6,6 +6,7 @@ import {
   asCustomFieldDefinitions,
   formatCustomFieldValue,
 } from "@/components/custom-fields";
+import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { FilterChip } from "@/components/filter-chip";
 import { Frame } from "@/components/frame";
 import { SortableTableHead } from "@/components/sortable-table-head";
@@ -171,9 +172,9 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
       {!!testCases.data?.length && (
         <div className="mt-4.5 flex flex-wrap items-center gap-2">
           <div className="flex w-[250px] items-center gap-1.5 border border-border bg-card px-2.5 py-[5px]">
-            <input
+            <DebouncedSearchInput
               value={search}
-              onChange={(e) => setParams({ q: e.target.value || undefined })}
+              onChange={(v) => setParams({ q: v || undefined })}
               placeholder="Search title or id…"
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
