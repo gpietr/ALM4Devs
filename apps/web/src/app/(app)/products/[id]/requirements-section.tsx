@@ -21,8 +21,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { formatItemId } from "@/lib/format-item-id";
-import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
+import type { ListColumn } from "@/lib/column-visibility";
 import { type FilterDef, useListFilters } from "@/lib/list-filters";
+import { useRememberedListState } from "@/lib/list-preferences";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Plus } from "lucide-react";
@@ -137,8 +138,6 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
   // these as query params to the backend.
   const { searchParams, setParams } = useUrlState();
   const search = searchParams.get("q") ?? "";
-  const sortBy = searchParams.get("sortBy");
-  const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
   // Declarative filters - see list-filters.ts. Adding a third filter later is one more
   // entry here, not a new Select/matching-logic block.
   const filterDefs = useMemo<FilterDef<NonNullable<typeof requirements.data>[number]>[]>(
@@ -159,20 +158,13 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
     [statuses.data, softwareVersionOptions.data],
   );
   const filters = useListFilters(filterDefs);
-  const columnIds = useMemo(
-    () => parseColumnParam(searchParams.get("columns"), columns),
-    [searchParams, columns],
-  );
+  // Columns/sort remembered per device across visits - see list-preferences.ts.
+  const { columnIds, sortBy, sortDir, setColumns, onSort } = useRememberedListState("requirements", columns);
   const visible = useMemo(() => new Set(columnIds), [columnIds]);
   const visibleCustomFields = useMemo(
     () => customFields.filter((f) => visible.has(f.id)),
     [customFields, visible],
   );
-
-  function onSort(key: string) {
-    if (sortBy === key) setParams({ sortDir: sortDir === "asc" ? "desc" : "asc" });
-    else setParams({ sortBy: key, sortDir: "asc" });
-  }
 
   const visibleRequirements = useMemo(() => {
     let rows = requirements.data ?? [];
@@ -331,11 +323,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
               Clear filters
             </Button>
           )}
-          <ColumnPicker
-            columns={columns}
-            selectedIds={columnIds}
-            onChange={(ids) => setParams({ columns: serializeColumnParam(ids, columns) })}
-          />
+          <ColumnPicker columns={columns} selectedIds={columnIds} onChange={setColumns} />
         </div>
       )}
 

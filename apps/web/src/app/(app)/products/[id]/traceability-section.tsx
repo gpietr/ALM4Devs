@@ -14,8 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
-import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
+import type { ListColumn } from "@/lib/column-visibility";
 import { type FilterDef, useListFilters } from "@/lib/list-filters";
+import { useRememberedListState } from "@/lib/list-preferences";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Download } from "lucide-react";
@@ -102,8 +103,6 @@ export function TraceabilitySection({ productId }: { productId: string }) {
   const { searchParams, setParams } = useUrlState();
   const statusFilter = searchParams.get("status") ?? ANY;
   const search = searchParams.get("q") ?? "";
-  const sortBy = searchParams.get("sortBy");
-  const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
   // One picker for built-in columns and both sides' tenant-defined fields. Req/TC
   // prefixes on the labels distinguish two fields that happen to share a name; the
   // ids stay the definition UUIDs (unique across entity types).
@@ -119,10 +118,8 @@ export function TraceabilitySection({ productId }: { productId: string }) {
     ],
     [reqCustomFields, tcCustomFields],
   );
-  const columnIds = useMemo(
-    () => parseColumnParam(searchParams.get("columns"), columns),
-    [searchParams, columns],
-  );
+  // Columns/sort remembered per device across visits - see list-preferences.ts.
+  const { columnIds, sortBy, sortDir, setColumns, onSort } = useRememberedListState("traceability", columns);
   const visible = useMemo(() => new Set(columnIds), [columnIds]);
   const visibleReqFields = useMemo(() => reqCustomFields.filter((f) => visible.has(f.id)), [reqCustomFields, visible]);
   const visibleTcFields = useMemo(() => tcCustomFields.filter((f) => visible.has(f.id)), [tcCustomFields, visible]);
@@ -145,11 +142,6 @@ export function TraceabilitySection({ productId }: { productId: string }) {
     [softwareVersionOptions.data],
   );
   const filters = useListFilters(filterDefs);
-
-  function onSort(key: string) {
-    if (sortBy === key) setParams({ sortDir: sortDir === "asc" ? "desc" : "asc" });
-    else setParams({ sortBy: key, sortDir: "asc" });
-  }
 
   const visibleRows = useMemo(() => {
     let rows = matrix.data ?? [];
@@ -279,11 +271,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
               Clear filters
             </Button>
           )}
-          <ColumnPicker
-            columns={columns}
-            selectedIds={columnIds}
-            onChange={(ids) => setParams({ columns: serializeColumnParam(ids, columns) })}
-          />
+          <ColumnPicker columns={columns} selectedIds={columnIds} onChange={setColumns} />
         </div>
       )}
 

@@ -13,8 +13,9 @@ import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatItemId } from "@/lib/format-item-id";
-import { parseColumnParam, serializeColumnParam, type ListColumn } from "@/lib/column-visibility";
+import type { ListColumn } from "@/lib/column-visibility";
 import { type FilterDef, useListFilters } from "@/lib/list-filters";
+import { useRememberedListState } from "@/lib/list-preferences";
 import { trpc } from "@/lib/trpc-client";
 import { useUrlState } from "@/lib/use-url-state";
 import { Plus } from "lucide-react";
@@ -80,8 +81,6 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
   // use-url-state.ts.
   const { searchParams, setParams } = useUrlState();
   const search = searchParams.get("q") ?? "";
-  const sortBy = searchParams.get("sortBy");
-  const sortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
   // Declarative filters - see list-filters.ts (same pattern as requirements-section.tsx).
   const filterDefs = useMemo<FilterDef<NonNullable<typeof testCases.data>[number]>[]>(
     () => [
@@ -95,20 +94,13 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
     [softwareVersionOptions.data],
   );
   const filters = useListFilters(filterDefs);
-  const columnIds = useMemo(
-    () => parseColumnParam(searchParams.get("columns"), columns),
-    [searchParams, columns],
-  );
+  // Columns/sort remembered per device across visits - see list-preferences.ts.
+  const { columnIds, sortBy, sortDir, setColumns, onSort } = useRememberedListState("testCases", columns);
   const visible = useMemo(() => new Set(columnIds), [columnIds]);
   const visibleCustomFields = useMemo(
     () => customFields.filter((f) => visible.has(f.id)),
     [customFields, visible],
   );
-
-  function onSort(key: string) {
-    if (sortBy === key) setParams({ sortDir: sortDir === "asc" ? "desc" : "asc" });
-    else setParams({ sortBy: key, sortDir: "asc" });
-  }
 
   const visibleTestCases = useMemo(() => {
     let rows = testCases.data ?? [];
@@ -195,11 +187,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
               Clear filters
             </Button>
           )}
-          <ColumnPicker
-            columns={columns}
-            selectedIds={columnIds}
-            onChange={(ids) => setParams({ columns: serializeColumnParam(ids, columns) })}
-          />
+          <ColumnPicker columns={columns} selectedIds={columnIds} onChange={setColumns} />
         </div>
       )}
 
