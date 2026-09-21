@@ -2,14 +2,13 @@
 
 import { AiStepAssistBody } from "@/components/ai-tools-panel";
 import type { RequirementOption } from "@/components/requirement-picker";
-import { RichTextEditor } from "@/components/rich-text-editor";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { StepDraft } from "@/components/test-steps-editor";
-import { htmlToPlainText } from "@/lib/text-diff";
 import { trpc } from "@/lib/trpc-client";
 import { cn } from "cn";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 type RailTab = "run" | "ai" | "history";
@@ -147,14 +146,34 @@ function RunTab({
   stepCount: number;
   isDirty: boolean;
 }) {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const environments = trpc.testCases.listEnvironments.useQuery();
   const [environmentId, setEnvironmentId] = useState("");
   const startExecution = trpc.testCases.startExecution.useMutation({
-    onSuccess: () => utils.testCases.get.invalidate({ id: testCaseId }),
+    onSuccess: ({ execution }) => {
+      utils.testCases.get.invalidate({ id: testCaseId });
+      router.push(`/test-cases/${testCaseId}/executions/${execution.id}`);
+    },
   });
 
-  if (openExecution) return <RunInProgressPanel executionId={openExecution.id} environmentName={openExecution.environmentName} />;
+  // Recording itself only happens in the full "protocol" layout (TestRunView, at the
+  // standalone executions/[executionId] route) - has room for the roster and recorder
+  // side by side, which this 352px-wide rail doesn't. So an open execution here is just a
+  // pointer to go finish it there, not the compact RunInProgressPanel this used to embed.
+  if (openExecution) {
+    return (
+      <div className="space-y-2.5 border border-border bg-card p-3">
+        <p className="text-[13px] text-muted-foreground">
+          Run in progress{openExecution.environmentName ? ` · ${openExecution.environmentName}` : ""} · started{" "}
+          {new Date(openExecution.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </p>
+        <Link href={`/test-cases/${testCaseId}/executions/${openExecution.id}`} className={buttonVariants({ className: "w-full" })}>
+          Continue run
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2.5 border border-border bg-card p-3">
@@ -189,214 +208,6 @@ function RunTab({
         Snapshots the {stepCount} step{stepCount === 1 ? "" : "s"} as they are now.
       </p>
       {startExecution.error && <p className="text-sm text-destructive">{startExecution.error.message}</p>}
-    </div>
-  );
-}
-
-/** The step roster + active-step record box for an open execution - shared between the
- * rail's Run tab and the standalone execution page (`executions/[executionId]/page.tsx`),
- * so a direct link to that route renders in the same grammar instead of the old
- * card-per-step layout it used to have. Recording is one step at a time (the active row,
- * defaulting to the first not-yet-recorded one) rather than every step editable
- * simultaneously - a real interaction change from before, not just a restyle, per the
- * design handoff's own "2d" proposal. */
-function useExecutionData(executionId: string) {
-  const query = trpc.testCases.getExecution.useQuery({ id: executionId });
-  return { execution: query.data?.execution, stepExecutions: query.data?.stepExecutions ?? [], query };
-}
-
-export function RunInProgressPanel({ executionId, environmentName }: { executionId: string; environmentName?: string }) {
-  const utils = trpc.useUtils();
-  const { execution, stepExecutions, query } = useExecutionData(executionId);
-  const completeExecution = trpc.testCases.completeExecution.useMutation({
-    onSuccess: () => utils.testCases.getExecution.invalidate({ id: executionId }),
-  });
-  const [activeStepId, setActiveStepId] = useState<string | null>(null);
-
-  if (query.isLoading) return <p className="text-[13.5px] text-muted-foreground">Loading…</p>;
-  if (query.error || !execution) return <p className="text-sm text-destructive">{query.error?.message}</p>;
-
-  const firstNotRun = stepExecutions.find((se) => se.status === "not_run");
-  const activeStep = stepExecutions.find((se) => se.id === activeStepId) ?? firstNotRun ?? stepExecutions[0];
-  const recordedCount = stepExecutions.filter((se) => se.status !== "not_run").length;
-  const allRecorded = recordedCount === stepExecutions.length;
-
-  return (
-    <div className="space-y-2.5">
-      <h5 className="font-heading text-[13px] tracking-[0.14em] text-muted-foreground uppercase">Run in progress</h5>
-      <div className="border border-border bg-card">
-        <div className="flex items-center justify-between border-b border-border px-2.5 py-2 text-[13px]">
-          <span>
-            {environmentName ? `${environmentName} · ` : ""}started{" "}
-            {new Date(execution.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </span>
-          <span className="border border-primary px-1.5 font-mono text-[11px] font-medium text-accent-tint-foreground">
-            {recordedCount}/{stepExecutions.length}
-          </span>
-        </div>
-        {stepExecutions.map((se, i) => (
-          <button
-            key={se.id}
-            type="button"
-            onClick={() => setActiveStepId(se.id)}
-            className={cn(
-              "flex w-full items-center gap-2.5 border-b border-foreground/9 px-2.5 py-[7px] text-left text-[13.5px] last:border-0",
-              activeStep?.id === se.id && "bg-primary/8",
-            )}
-          >
-            <ResultSquare status={se.status} />
-            <span className="font-mono text-[11.5px] text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
-            <span className="min-w-0 flex-1 truncate">{htmlToPlainText(se.descriptionSnapshot)}</span>
-            <span className="text-xs text-muted-foreground">
-              {se.id === activeStep?.id && se.status === "not_run" ? "record" : se.status.replaceAll("_", " ")}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {activeStep && (
-        <ActiveStepRecorder
-          key={activeStep.id}
-          stepExecution={activeStep}
-          executionId={executionId}
-          stepNumber={stepExecutions.findIndex((se) => se.id === activeStep.id) + 1}
-        />
-      )}
-
-      {!execution.completedAt && (
-        <div>
-          <Button
-            className="w-full"
-            disabled={!allRecorded || completeExecution.isPending}
-            onClick={() => completeExecution.mutate({ executionId })}
-          >
-            {completeExecution.isPending ? "Completing…" : "Complete execution"}
-          </Button>
-          {!allRecorded && (
-            <p className="mt-1.5 text-[12.5px] text-muted-foreground">Record a result for every step before completing.</p>
-          )}
-          {completeExecution.error && <p className="mt-1.5 text-sm text-destructive">{completeExecution.error.message}</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-type StepExecution = ReturnType<typeof useExecutionData>["stepExecutions"][number];
-
-function ActiveStepRecorder({
-  stepExecution,
-  executionId,
-  stepNumber,
-}: {
-  stepExecution: StepExecution;
-  executionId: string;
-  stepNumber: number;
-}) {
-  const utils = trpc.useUtils();
-  const recordResult = trpc.testCases.recordStepResult.useMutation({
-    onSuccess: () => utils.testCases.getExecution.invalidate({ id: executionId }),
-  });
-
-  const [actualResult, setActualResult] = useState(stepExecution.actualResult ?? "");
-  const [status, setStatus] = useState<"pass" | "fail" | "blocked">(
-    stepExecution.status === "not_run" ? "pass" : (stepExecution.status as "pass" | "fail" | "blocked"),
-  );
-  const [uploading, setUploading] = useState(false);
-
-  function save() {
-    if (!actualResult.trim() || recordResult.isPending) return;
-    recordResult.mutate({ testStepExecutionId: stepExecution.id, actualResult, status });
-  }
-
-  // A real ⌘↵ handler, not just a label claiming one exists (see the design handoff's
-  // "only claim the keys you actually wire up" rule) - scoped to while this step's
-  // recorder is mounted, since `key` on the parent already remounts it per active step.
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        save();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actualResult, status]);
-
-  async function handleEvidenceUpload(file: File) {
-    setUploading(true);
-    try {
-      const res = await fetch(`/api/attachments/upload?stepExecutionId=${stepExecution.id}`, {
-        method: "POST",
-        headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": file.name },
-        body: file,
-      });
-      if (res.ok) await utils.testCases.getExecution.invalidate({ id: executionId });
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  return (
-    <div className="border border-border bg-background p-2.5">
-      <p className="mb-1.5 font-mono text-[10.5px] tracking-[0.12em] text-muted-foreground uppercase">
-        Step {String(stepNumber).padStart(2, "0")} · Actual result
-      </p>
-      <RichTextEditor compact value={actualResult} onChange={setActualResult} stepExecutionId={stepExecution.id} />
-      <div className="mt-2 flex gap-1.5">
-        {(["pass", "fail", "blocked"] as const).map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setStatus(s)}
-            className={cn(
-              "flex-1 border py-1 text-center font-mono text-[11.5px] font-medium uppercase",
-              status === s ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground",
-            )}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[12.5px] text-muted-foreground">
-        <label className="cursor-pointer hover:text-foreground">
-          {uploading ? "Uploading…" : "Attach evidence"}
-          <input
-            type="file"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleEvidenceUpload(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={save}
-          disabled={recordResult.isPending || !actualResult.trim()}
-          className="font-mono disabled:opacity-45"
-        >
-          {recordResult.isPending ? "saving…" : "⌘↵ save"}
-        </button>
-      </div>
-      {recordResult.error && <p className="mt-1.5 text-xs text-destructive">{recordResult.error.message}</p>}
-      {stepExecution.evidence.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {stepExecution.evidence.map((ev: StepExecution["evidence"][number]) => (
-            <a
-              key={ev.id}
-              href={`/api/attachments/${ev.id}`}
-              target="_blank"
-              rel="noreferrer"
-              className="border border-border px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              {ev.filename}
-            </a>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

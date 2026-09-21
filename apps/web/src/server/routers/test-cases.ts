@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import {
+  abandonExecution,
   completeExecution,
   createTestCase,
   type CustomFieldValueInput,
@@ -162,6 +163,31 @@ export const testCasesRouter = router({
         const architectureByTestCase = await listArchitectureDisplayIdsByTestCase(tx, tenantId, ids);
         const softwareVersionsByTestCase = await listSoftwareVersionsForEntities(tx, tenantId, "test_case", ids);
 
+        // "Last run" column - same "ordered newest-first, first one seen per key wins"
+        // batched pattern as traceability.ts's lastExecutionByTestCase and test-sets.ts's
+        // getLastExecutionsForItems, just keyed by test case id directly rather than by
+        // test-set item.
+        const lastExecutionRows =
+          ids.length === 0
+            ? []
+            : await tx
+                .select({
+                  testCaseId: schema.testExecutions.testCaseId,
+                  id: schema.testExecutions.id,
+                  status: schema.testExecutions.status,
+                  startedAt: schema.testExecutions.startedAt,
+                  completedAt: schema.testExecutions.completedAt,
+                  executedByName: schema.user.name,
+                })
+                .from(schema.testExecutions)
+                .innerJoin(schema.user, eq(schema.testExecutions.executedBy, schema.user.id))
+                .where(and(eq(schema.testExecutions.tenantId, tenantId), inArray(schema.testExecutions.testCaseId, ids)))
+                .orderBy(desc(schema.testExecutions.startedAt));
+        const lastExecutionByTestCase = new Map<string, (typeof lastExecutionRows)[number]>();
+        for (const ex of lastExecutionRows) {
+          if (!lastExecutionByTestCase.has(ex.testCaseId)) lastExecutionByTestCase.set(ex.testCaseId, ex);
+        }
+
         return rows.map((r) => ({
           ...r,
           levelCode: level.code,
@@ -169,6 +195,7 @@ export const testCasesRouter = router({
           architectureLinks: architectureByTestCase.get(r.id) ?? [],
           customFieldValues: customFieldsByTestCase.get(r.id) ?? [],
           softwareVersions: softwareVersionsByTestCase.get(r.id) ?? [],
+          lastExecution: lastExecutionByTestCase.get(r.id) ?? null,
         }));
       });
     }),
@@ -373,17 +400,28 @@ export const testCasesRouter = router({
           evidence: await listEvidenceForStepExecution(tx, tenantId, se.id),
         })),
       );
-      return { execution, stepExecutions: stepsWithEvidence };
+      // Same "join for a display name" pattern as document-context.ts's own executedByUser
+      // lookup - execution.executedBy is only a user id, and the run header needs a name.
+      const [executedByUser] = await tx.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, execution.executedBy));
+      return { execution: { ...execution, executedByName: executedByUser?.name ?? null }, stepExecutions: stepsWithEvidence };
     });
   }),
 
   recordStepResult: protectedProcedure
     .input(
-      z.object({
-        testStepExecutionId: z.string().uuid(),
-        actualResult: z.string().trim().min(1).max(20000),
-        status: z.enum(["pass", "fail", "blocked"]),
-      }),
+      // A pass speaks for itself - only fail/blocked require a note explaining what
+      // actually happened, same as a bug report needs repro details but a passing test
+      // doesn't need an essay.
+      z
+        .object({
+          testStepExecutionId: z.string().uuid(),
+          actualResult: z.string().trim().max(20000),
+          status: z.enum(["pass", "fail", "blocked"]),
+        })
+        .refine((v) => v.status === "pass" || v.actualResult.length > 0, {
+          message: "Describe what actually happened",
+          path: ["actualResult"],
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
@@ -403,6 +441,16 @@ export const testCasesRouter = router({
       const tenantId = tenantOf(ctx);
       const userId = userIdOf(ctx);
       return withTenant(db, tenantId, (tx) => completeExecution(tx, tenantId, input.executionId, userId)).catch(
+        toBadRequest,
+      );
+    }),
+
+  abandonExecution: protectedProcedure
+    .input(z.object({ executionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      const userId = userIdOf(ctx);
+      return withTenant(db, tenantId, (tx) => abandonExecution(tx, tenantId, input.executionId, userId)).catch(
         toBadRequest,
       );
     }),

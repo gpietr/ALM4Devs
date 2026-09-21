@@ -77,6 +77,7 @@ export interface TestSetRoundSummary extends TestSetRoundView {
   passCount: number;
   failCount: number;
   blockedCount: number;
+  abandonedCount: number;
 }
 
 const TEST_SET_COLUMNS = {
@@ -339,6 +340,7 @@ export async function listTestSetRounds(db: TenantTx, tenantId: string, testSetI
       passCount: statuses.filter((s) => s === "pass").length,
       failCount: statuses.filter((s) => s === "fail").length,
       blockedCount: statuses.filter((s) => s === "blocked").length,
+      abandonedCount: statuses.filter((s) => s === "abandoned").length,
     };
   });
 }

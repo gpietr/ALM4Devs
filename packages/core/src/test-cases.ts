@@ -904,3 +904,35 @@ export async function completeExecution(db: TenantTx, tenantId: string, testExec
 
   return updated;
 }
+
+/** Gives up on an open run instead of finishing it - unlike completeExecution, this
+ * doesn't require every step to be recorded first (that's the whole point: abandoning is
+ * for a run that isn't going to get finished). Same "already completed" guard, since an
+ * abandoned run is completed too (just with a status that isn't a real verdict) - it can't
+ * be abandoned twice or un-abandoned back to in_progress. */
+export async function abandonExecution(db: TenantTx, tenantId: string, testExecutionId: string, actorUserId: string) {
+  const [execution] = await db
+    .select()
+    .from(schema.testExecutions)
+    .where(and(eq(schema.testExecutions.id, testExecutionId), eq(schema.testExecutions.tenantId, tenantId)));
+  if (!execution) throw new DomainError("execution not found");
+  if (execution.completedAt) throw new DomainError("execution is already completed");
+
+  const [updated] = await db
+    .update(schema.testExecutions)
+    .set({ status: "abandoned", completedAt: new Date() })
+    .where(eq(schema.testExecutions.id, testExecutionId))
+    .returning();
+  if (!updated) throw new DomainError("failed to abandon execution");
+
+  await writeAuditLog(db, {
+    tenantId,
+    actorUserId,
+    action: "test_execution.abandoned",
+    entityType: "test_execution",
+    entityId: testExecutionId,
+    payload: {},
+  });
+
+  return updated;
+}

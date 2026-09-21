@@ -39,7 +39,7 @@ import { useRouter } from "next/navigation";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 
 const NO_ENVIRONMENT = "__none__";
-const STATUS_ORDER = ["not_run", "in_progress", "pass", "fail", "blocked"] as const;
+const STATUS_ORDER = ["not_run", "in_progress", "pass", "fail", "blocked", "abandoned"] as const;
 
 interface TestCaseOption {
   id: string;
@@ -402,14 +402,14 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
   );
 }
 
-/** Summary strip above the table: pass/fail/blocked/not-run/in-progress counts (derived
- * from each item's `lastExecution`, no extra query) plus a "currently running" roster -
- * literally "what's being run at the moment", i.e. started but not yet completed. Renders
- * nothing for an empty set - there's nothing to summarize yet. */
+/** Summary strip above the table: pass/fail/blocked/abandoned/not-run/in-progress counts
+ * (derived from each item's `lastExecution`, no extra query) plus a "currently running"
+ * roster - literally "what's being run at the moment", i.e. started but not yet
+ * completed. Renders nothing for an empty set - there's nothing to summarize yet. */
 function RunOverview({ items }: { items: TestSetItem[] }) {
   if (items.length === 0) return null;
 
-  const counts: Record<string, number> = { not_run: 0, in_progress: 0, pass: 0, fail: 0, blocked: 0 };
+  const counts: Record<string, number> = { not_run: 0, in_progress: 0, pass: 0, fail: 0, blocked: 0, abandoned: 0 };
   for (const item of items) {
     const status = item.lastExecution?.status ?? "not_run";
     counts[status] = (counts[status] ?? 0) + 1;

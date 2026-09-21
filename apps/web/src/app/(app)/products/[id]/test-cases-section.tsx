@@ -9,6 +9,7 @@ import {
 import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { FilterChip } from "@/components/filter-chip";
 import { Frame } from "@/components/frame";
+import { ResultBadge } from "@/components/result-badge";
 import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -26,6 +27,7 @@ const BUILTIN_COLUMNS: ListColumn[] = [
   { id: "id", label: "ID", required: true },
   { id: "title", label: "Test case" },
   { id: "covers", label: "Covers" },
+  { id: "lastRun", label: "Last run" },
   { id: "architecture", label: "Software items", defaultVisible: false },
   { id: "versions", label: "Versions", defaultVisible: false },
   { id: "created", label: "Created" },
@@ -36,6 +38,7 @@ interface SortableTestCase {
   title: string;
   coversCount: number;
   createdAt: string | Date;
+  lastExecution: { startedAt: string | Date } | null;
 }
 
 function compareTestCases(a: SortableTestCase, b: SortableTestCase, sortBy: string): number {
@@ -46,6 +49,13 @@ function compareTestCases(a: SortableTestCase, b: SortableTestCase, sortBy: stri
       return a.title.localeCompare(b.title);
     case "covers":
       return a.coversCount - b.coversCount;
+    case "lastRun": {
+      // Never-run test cases sort as "oldest" (before anything that has a real date), in
+      // both directions - same "no timestamp reads as the far past" rule as elsewhere.
+      const at = a.lastExecution ? new Date(a.lastExecution.startedAt).getTime() : 0;
+      const bt = b.lastExecution ? new Date(b.lastExecution.startedAt).getTime() : 0;
+      return at - bt;
+    }
     case "created":
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     default:
@@ -224,6 +234,9 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                 {visible.has("covers") && (
                   <SortableTableHead label="Covers" sortKey="covers" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[130px]" />
                 )}
+                {visible.has("lastRun") && (
+                  <SortableTableHead label="Last run" sortKey="lastRun" activeSortKey={sortBy} direction={sortDir} onSort={onSort} className="w-[150px]" />
+                )}
                 {visible.has("architecture") && <TableHead className="w-[160px]">Architecture</TableHead>}
                 {visible.has("versions") && <TableHead className="w-[140px]">Versions</TableHead>}
                 {visible.has("created") && (
@@ -275,6 +288,20 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                         </Link>
                       ) : (
                         <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  )}
+                  {visible.has("lastRun") && (
+                    <TableCell>
+                      {tc.lastExecution ? (
+                        <Link href={`/test-cases/${tc.id}/executions/${tc.lastExecution.id}`} className="block space-y-0.5">
+                          <ResultBadge status={tc.lastExecution.status} />
+                          <p className="text-[11.5px] text-muted-foreground">
+                            {new Date(tc.lastExecution.startedAt).toLocaleDateString()} · {tc.lastExecution.executedByName}
+                          </p>
+                        </Link>
+                      ) : (
+                        <span className="text-[13px] text-muted-foreground">Never run</span>
                       )}
                     </TableCell>
                   )}

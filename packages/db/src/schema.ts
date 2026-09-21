@@ -456,9 +456,11 @@ export const testExecutions = pgTable("test_executions", {
   // run ever made against that item. `onDelete: "set null"` for the same reason as
   // testSetItemId above - deleting the round must not delete real execution history.
   testSetRoundId: uuid("test_set_round_id").references(() => testSetRounds.id, { onDelete: "set null" }),
-  // CHECK-constrained: 'in_progress' | 'pass' | 'fail' | 'blocked'. Computed as a rollup
-  // of step results when the run is completed (see packages/core's completeExecution) -
-  // not independently editable.
+  // CHECK-constrained: 'in_progress' | 'pass' | 'fail' | 'blocked' | 'abandoned'. Pass/
+  // fail/blocked are a rollup of step results when the run is completed (see packages/
+  // core's completeExecution); 'abandoned' is set directly instead (see abandonExecution)
+  // when a run is given up on rather than finished - not independently editable either
+  // way.
   status: text("status").notNull().default("in_progress"),
   executedBy: text("executed_by")
     .notNull()
