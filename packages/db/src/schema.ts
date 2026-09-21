@@ -446,6 +446,16 @@ export const testExecutions = pgTable("test_executions", {
   environmentId: uuid("environment_id")
     .notNull()
     .references(() => testEnvironments.id),
+  // Set when this run was started from a test set's row (packages/core's
+  // addTestSetItem/startExecution), null for a run started from the test case's own page.
+  // `onDelete: "set null"`, not cascade - removing the placement (or the whole set) must
+  // not destroy the execution's own history, just detach it from that set.
+  testSetItemId: uuid("test_set_item_id").references(() => testSetItems.id, { onDelete: "set null" }),
+  // Set when a round was active on the set at the time this run was started (packages/
+  // core's test-sets.ts) - lets a round's progress show only its own runs, not every
+  // run ever made against that item. `onDelete: "set null"` for the same reason as
+  // testSetItemId above - deleting the round must not delete real execution history.
+  testSetRoundId: uuid("test_set_round_id").references(() => testSetRounds.id, { onDelete: "set null" }),
   // CHECK-constrained: 'in_progress' | 'pass' | 'fail' | 'blocked'. Computed as a rollup
   // of step results when the run is completed (see packages/core's completeExecution) -
   // not independently editable.
@@ -455,7 +465,13 @@ export const testExecutions = pgTable("test_executions", {
     .references(() => user.id),
   startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
-});
+}, (t) => [
+  // packages/core's getTestSet batches "latest execution per item" by filtering on this
+  // column across every item in a set - same indexing lesson as
+  // requirements_current_version_id_idx above.
+  index("test_executions_test_set_item_id_idx").on(t.testSetItemId),
+  index("test_executions_test_set_round_id_idx").on(t.testSetRoundId),
+]);
 
 export const testStepExecutions = pgTable("test_step_executions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -480,6 +496,75 @@ export const testStepExecutions = pgTable("test_step_executions", {
   // CHECK-constrained: 'not_run' | 'pass' | 'fail' | 'blocked'.
   status: text("status").notNull().default("not_run"),
   recordedAt: timestamp("recorded_at", { withTimezone: true }),
+});
+
+// --- Test sets: a named, ordered, reusable subset of tests to run -------------------
+// Authoring only for now - this doesn't touch testExecutions/startExecution at all.
+// Product-scoped like every other artifact (requirements, test cases, architecture).
+export const testSets = pgTable("test_sets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  productId: uuid("product_id")
+    .notNull()
+    .references(() => products.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => user.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One row per (test set, test case) *placement*, not a link table keyed by the pair -
+// `id` is its own primary key because the same test case can be added to a set more than
+// once (e.g. once per environment: "run TC-12 on a VM" and "run TC-12 on real hardware"
+// are two separate rows). `environmentId` is nullable - tagging an entry with an
+// environment is optional, not mandatory. Further custom parameters (anything beyond
+// environment) live in `custom_field_values` under `entityType = 'test_run'`, keyed by
+// this row's own id - no new table needed for those (see that table's schema comment).
+export const testSetItems = pgTable("test_set_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  testSetId: uuid("test_set_id")
+    .notNull()
+    .references(() => testSets.id, { onDelete: "cascade" }),
+  testCaseId: uuid("test_case_id")
+    .notNull()
+    .references(() => testCases.id, { onDelete: "cascade" }),
+  environmentId: uuid("environment_id").references(() => testEnvironments.id),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => user.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One pass through a test set (e.g. "Release 1.2"), run before every release - a bucket
+// to tag executions with, not an entity with its own lifecycle to close (no status/
+// completedAt column: progress is entirely derived from the executions tagged to it, same
+// "don't store what you can derive" reasoning as testExecutions.status's own rollup).
+// Deliberately not called a "run" anywhere in the UI - that word already means a single
+// test case's execution throughout this app (testExecutions, "Start run", "Run in
+// progress"); reusing it here for "a pass through the whole set" would make every button
+// ambiguous. Optional: a set that never starts one behaves exactly as if this table didn't
+// exist (see test-sets.ts's getTestSet, unaffected by rounds).
+export const testSetRounds = pgTable("test_set_rounds", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  testSetId: uuid("test_set_id")
+    .notNull()
+    .references(() => testSets.id, { onDelete: "cascade" }),
+  label: text("label"),
+  startedBy: text("started_by")
+    .notNull()
+    .references(() => user.id),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Generic file registry: a durable "this file belongs to this tenant" record, separate

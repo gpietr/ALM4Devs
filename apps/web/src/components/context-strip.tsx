@@ -108,11 +108,12 @@ function initialsFor(name?: string, email?: string): string {
   return (email?.[0] ?? "?").toUpperCase();
 }
 
-type Artifact = "requirements" | "architecture" | "testCases" | "traceability" | "versions";
+type Artifact = "requirements" | "architecture" | "testCases" | "testSets" | "traceability" | "versions";
 
 const ARTIFACT_TABS: ReadonlyArray<{ key: Artifact; label: string }> = [
   { key: "requirements", label: "Requirements" },
   { key: "testCases", label: "Test cases" },
+  { key: "testSets", label: "Test sets" },
   { key: "traceability", label: "Traceability" },
   { key: "architecture", label: "Architecture" },
   { key: "versions", label: "Versions" },

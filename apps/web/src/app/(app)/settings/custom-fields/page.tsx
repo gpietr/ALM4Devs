@@ -39,11 +39,24 @@ export default function CustomFieldsSettingsPage() {
 
       <h3 className="mt-10 text-base font-semibold tracking-tight">Test case fields</h3>
       <CustomFieldsSection entityType="test_case" />
+
+      <h3 className="mt-10 text-base font-semibold tracking-tight">Test run fields</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Custom parameters for a test set entry, beyond the built-in environment - e.g. Browser,
+        Build config.
+      </p>
+      <CustomFieldsSection entityType="test_run" />
     </div>
   );
 }
 
-function CustomFieldsSection({ entityType }: { entityType: "requirement" | "test_case" }) {
+const ENTITY_NOUN: Record<"requirement" | "test_case" | "test_run", string> = {
+  requirement: "requirement",
+  test_case: "test case",
+  test_run: "test run",
+};
+
+function CustomFieldsSection({ entityType }: { entityType: "requirement" | "test_case" | "test_run" }) {
   const utils = trpc.useUtils();
   const fields = trpc.settings.listCustomFields.useQuery({ entityType });
 
@@ -155,9 +168,7 @@ function CustomFieldsSection({ entityType }: { entityType: "requirement" | "test
                 onClick={() => {
                   if (
                     confirm(
-                      `Delete "${field.name}"? This permanently deletes every value ever set for it on every ${
-                        entityType === "requirement" ? "requirement" : "test case"
-                      } - not just future ones.`,
+                      `Delete "${field.name}"? This permanently deletes every value ever set for it on every ${ENTITY_NOUN[entityType]} - not just future ones.`,
                     )
                   ) {
                     deleteField.mutate({ fieldId: field.id });

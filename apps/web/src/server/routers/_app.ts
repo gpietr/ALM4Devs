@@ -8,6 +8,7 @@ import { settingsRouter } from "./settings";
 import { softwareVersionsRouter } from "./software-versions";
 import { spiraImportRouter } from "./spira-import";
 import { testCasesRouter } from "./test-cases";
+import { testSetsRouter } from "./test-sets";
 import { traceabilityRouter } from "./traceability";
 import { vulnerabilitiesRouter } from "./vulnerabilities";
 
@@ -28,6 +29,7 @@ export const appRouter = router({
   settings: settingsRouter,
   softwareVersions: softwareVersionsRouter,
   testCases: testCasesRouter,
+  testSets: testSetsRouter,
   spiraImport: spiraImportRouter,
   traceability: traceabilityRouter,
   vulnerabilities: vulnerabilitiesRouter,

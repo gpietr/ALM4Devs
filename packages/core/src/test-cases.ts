@@ -729,7 +729,21 @@ export async function getCoveringTestCases(db: TenantTx, tenantId: string, requi
 
 export async function startExecution(
   db: TenantTx,
-  params: { tenantId: string; testCaseId: string; environmentId: string; executedBy: string },
+  params: {
+    tenantId: string;
+    testCaseId: string;
+    environmentId: string;
+    executedBy: string;
+    /** Set when this run is started from a test set's row (test-sets.ts's page), so the
+     * execution can be traced back to that specific placement - see test_executions'
+     * testSetItemId column. Validated against `testCaseId` here rather than trusted
+     * as-is, since it comes straight from client input. */
+    testSetItemId?: string;
+    /** Set when a round was selected on the set's page at the time this run was started
+     * (test-sets.ts's createTestSetRound) - lets a round's progress show only its own
+     * runs. Only meaningful alongside testSetItemId; validated against it below. */
+    testSetRoundId?: string;
+  },
 ) {
   const steps = await db
     .select()
@@ -738,6 +752,24 @@ export async function startExecution(
     .orderBy(asc(schema.testSteps.stepNumber));
   if (steps.length === 0) throw new DomainError("test case has no steps to execute");
 
+  if (params.testSetItemId) {
+    const [item] = await db
+      .select({ testCaseId: schema.testSetItems.testCaseId, testSetId: schema.testSetItems.testSetId })
+      .from(schema.testSetItems)
+      .where(and(eq(schema.testSetItems.id, params.testSetItemId), eq(schema.testSetItems.tenantId, params.tenantId)));
+    if (!item) throw new DomainError("test set item not found");
+    if (item.testCaseId !== params.testCaseId) throw new DomainError("test set item does not match this test case");
+
+    if (params.testSetRoundId) {
+      const [round] = await db
+        .select({ testSetId: schema.testSetRounds.testSetId })
+        .from(schema.testSetRounds)
+        .where(and(eq(schema.testSetRounds.id, params.testSetRoundId), eq(schema.testSetRounds.tenantId, params.tenantId)));
+      if (!round) throw new DomainError("test set round not found");
+      if (round.testSetId !== item.testSetId) throw new DomainError("test set round does not match this test set item");
+    }
+  }
+
   const [execution] = await db
     .insert(schema.testExecutions)
     .values({
@@ -745,6 +777,8 @@ export async function startExecution(
       testCaseId: params.testCaseId,
       environmentId: params.environmentId,
       executedBy: params.executedBy,
+      testSetItemId: params.testSetItemId ?? null,
+      testSetRoundId: params.testSetRoundId ?? null,
     })
     .returning();
   if (!execution) throw new DomainError("failed to start execution");
@@ -774,7 +808,12 @@ export async function startExecution(
     action: "test_execution.started",
     entityType: "test_execution",
     entityId: execution.id,
-    payload: { testCaseId: params.testCaseId, stepCount: steps.length },
+    payload: {
+      testCaseId: params.testCaseId,
+      stepCount: steps.length,
+      testSetItemId: params.testSetItemId ?? null,
+      testSetRoundId: params.testSetRoundId ?? null,
+    },
   });
 
   return { execution, stepExecutions };

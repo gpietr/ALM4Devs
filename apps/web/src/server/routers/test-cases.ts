@@ -338,7 +338,14 @@ export const testCasesRouter = router({
     }),
 
   startExecution: protectedProcedure
-    .input(z.object({ testCaseId: z.string().uuid(), environmentId: z.string().uuid() }))
+    .input(
+      z.object({
+        testCaseId: z.string().uuid(),
+        environmentId: z.string().uuid(),
+        testSetItemId: z.string().uuid().optional(),
+        testSetRoundId: z.string().uuid().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
       const userId = userIdOf(ctx);
@@ -348,6 +355,8 @@ export const testCasesRouter = router({
           testCaseId: input.testCaseId,
           environmentId: input.environmentId,
           executedBy: userId,
+          testSetItemId: input.testSetItemId,
+          testSetRoundId: input.testSetRoundId,
         }),
       ).catch(toBadRequest);
     }),

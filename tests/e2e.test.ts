@@ -3856,3 +3856,406 @@ describe("e2e: software versions module", () => {
     expect(gapRow.testCaseSoftwareVersions).toEqual([]);
   });
 });
+
+describe("e2e: test sets", () => {
+  async function createTestCase(tenant: TestTenant, productId: string, title: string) {
+    const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
+    const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
+      productId,
+      levelId: testLevel.id,
+      customFieldValues: [await testTypeCustomFieldValue(tenant.cookie, "Verification")],
+      title,
+      steps: [{ description: "<p>Do it</p>", expectedResult: "<p>Works</p>" }],
+    });
+    expect(testCase.ok).toBe(true);
+    return testCase.data.testCase.id as string;
+  }
+
+  test("create, list, update, and delete a test set", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+
+    const created = await rpc(tenant.cookie, "POST", "testSets.create", {
+      productId,
+      name: "Smoke test",
+      description: "Runs before every release",
+    });
+    expect(created.ok).toBe(true);
+    expect(created.data).toMatchObject({ name: "Smoke test", description: "Runs before every release" });
+
+    const listed = await rpc(tenant.cookie, "GET", "testSets.listByProduct", { productId });
+    expect(listed.data).toMatchObject([{ id: created.data.id, name: "Smoke test", itemCount: 0 }]);
+
+    const updated = await rpc(tenant.cookie, "POST", "testSets.update", {
+      id: created.data.id,
+      name: "Release smoke test",
+      description: "Updated",
+    });
+    expect(updated.ok).toBe(true);
+    expect(updated.data.name).toBe("Release smoke test");
+
+    const deleted = await rpc(tenant.cookie, "POST", "testSets.delete", { id: created.data.id });
+    expect(deleted.ok).toBe(true);
+    const afterDelete = await rpc(tenant.cookie, "GET", "testSets.listByProduct", { productId });
+    expect(afterDelete.data).toHaveLength(0);
+  });
+
+  test("the same test case can be added more than once, each under a different environment", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseId = await createTestCase(tenant, productId, "Login works");
+    const defaultEnv = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const vmEnv = await rpc(tenant.cookie, "POST", "settings.createEnvironment", { name: "VM" });
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Cross-env" });
+    const testSetId = set.data.id;
+
+    const onDefault = await rpc(tenant.cookie, "POST", "testSets.addItem", {
+      testSetId,
+      testCaseId,
+      environmentId: defaultEnv.id,
+    });
+    expect(onDefault.ok).toBe(true);
+    const onVm = await rpc(tenant.cookie, "POST", "testSets.addItem", {
+      testSetId,
+      testCaseId,
+      environmentId: vmEnv.data.id,
+    });
+    expect(onVm.ok).toBe(true);
+    expect(onVm.data.id).not.toBe(onDefault.data.id);
+
+    const detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: testSetId });
+    expect(detail.data.items).toHaveLength(2);
+    expect(detail.data.items.every((i: any) => i.testCaseId === testCaseId)).toBe(true);
+    expect(detail.data.items.map((i: any) => i.environmentName)).toEqual(["Default", "VM"]);
+
+    const listed = await rpc(tenant.cookie, "GET", "testSets.listByProduct", { productId });
+    expect(listed.data[0].itemCount).toBe(2);
+  });
+
+  test("test_run custom parameters can be set and read on an entry", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseId = await createTestCase(tenant, productId, "Checkout works");
+    const browserField = await rpc(tenant.cookie, "POST", "settings.createCustomField", {
+      entityType: "test_run",
+      name: "Browser",
+      fieldType: "short_text",
+    });
+    expect(browserField.ok).toBe(true);
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Browsers" });
+    const added = await rpc(tenant.cookie, "POST", "testSets.addItem", {
+      testSetId: set.data.id,
+      testCaseId,
+      customFieldValues: [{ fieldId: browserField.data.id, value: "Firefox" }],
+    });
+    expect(added.ok).toBe(true);
+
+    let detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    expect(detail.data.items[0].customFieldValues).toMatchObject([{ fieldId: browserField.data.id, value: "Firefox" }]);
+
+    const updated = await rpc(tenant.cookie, "POST", "testSets.updateItem", {
+      itemId: added.data.id,
+      customFieldValues: [{ fieldId: browserField.data.id, value: "Chrome" }],
+    });
+    expect(updated.ok).toBe(true);
+
+    detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    expect(detail.data.items[0].customFieldValues).toMatchObject([{ fieldId: browserField.data.id, value: "Chrome" }]);
+  });
+
+  test("entries can be reordered and removed", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const tc1 = await createTestCase(tenant, productId, "First");
+    const tc2 = await createTestCase(tenant, productId, "Second");
+    const tc3 = await createTestCase(tenant, productId, "Third");
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Ordered" });
+    const testSetId = set.data.id;
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc1 });
+    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc2 });
+    const item3 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc3 });
+
+    let detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: testSetId });
+    expect(detail.data.items.map((i: any) => i.testCaseId)).toEqual([tc1, tc2, tc3]);
+
+    // Move the third entry up once - now second.
+    const reordered = await rpc(tenant.cookie, "POST", "testSets.reorderItem", {
+      testSetId,
+      itemId: item3.data.id,
+      direction: "up",
+    });
+    expect(reordered.ok).toBe(true);
+    detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: testSetId });
+    expect(detail.data.items.map((i: any) => i.testCaseId)).toEqual([tc1, tc3, tc2]);
+
+    const removed = await rpc(tenant.cookie, "POST", "testSets.removeItem", { itemId: item1.data.id });
+    expect(removed.ok).toBe(true);
+    detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: testSetId });
+    expect(detail.data.items.map((i: any) => i.testCaseId)).toEqual([tc3, tc2]);
+  });
+
+  test("a test set can only contain test cases from its own product", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const productA = await rpc(tenant.cookie, "POST", "products.create", { name: "A" });
+    const productB = await rpc(tenant.cookie, "POST", "products.create", { name: "B" });
+    const testCaseInB = await createTestCase(tenant, productB.data.id, "Other product's test");
+
+    const setInA = await rpc(tenant.cookie, "POST", "testSets.create", { productId: productA.data.id, name: "A's set" });
+    const rejected = await rpc(tenant.cookie, "POST", "testSets.addItem", {
+      testSetId: setInA.data.id,
+      testCaseId: testCaseInB,
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error?.message).toMatch(/own product/);
+  });
+
+  test("a run started from a test set item is tracked on that item and shows up as in progress", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseId = await createTestCase(tenant, productId, "Login works");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Regression" });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", {
+      testSetId: set.data.id,
+      testCaseId,
+      environmentId: env.id,
+    });
+
+    let detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    expect(detail.data.items[0].lastExecution).toBeNull();
+
+    const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId,
+      environmentId: env.id,
+      testSetItemId: item.data.id,
+    });
+    expect(started.ok).toBe(true);
+
+    detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    expect(detail.data.items[0].lastExecution).toMatchObject({
+      id: started.data.execution.id,
+      status: "in_progress",
+      completedAt: null,
+      executedByName: "E2E Tester",
+    });
+
+    // Completing the run flips the item's lastExecution to the rollup result.
+    const stepExecutionId = started.data.stepExecutions[0].id;
+    await rpc(tenant.cookie, "POST", "testCases.recordStepResult", {
+      testStepExecutionId: stepExecutionId,
+      actualResult: "Worked",
+      status: "pass",
+    });
+    const completed = await rpc(tenant.cookie, "POST", "testCases.completeExecution", {
+      executionId: started.data.execution.id,
+    });
+    expect(completed.ok).toBe(true);
+
+    detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    expect(detail.data.items[0].lastExecution.status).toBe("pass");
+    expect(detail.data.items[0].lastExecution.completedAt).not.toBeNull();
+  });
+
+  test("the same test case placed twice in a set can be run independently under each placement", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseId = await createTestCase(tenant, productId, "Cross-env test");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Cross-env" });
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+
+    await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId,
+      environmentId: env.id,
+      testSetItemId: item1.data.id,
+    });
+
+    const detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    const row1 = detail.data.items.find((i: any) => i.id === item1.data.id);
+    const row2 = detail.data.items.find((i: any) => i.id === item2.data.id);
+    expect(row1.lastExecution).not.toBeNull();
+    expect(row2.lastExecution).toBeNull();
+  });
+
+  test("removing a test set item detaches but doesn't delete its execution history", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseId = await createTestCase(tenant, productId, "To be removed");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Temp set" });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+    const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId,
+      environmentId: env.id,
+      testSetItemId: item.data.id,
+    });
+    expect(started.ok).toBe(true);
+
+    const removed = await rpc(tenant.cookie, "POST", "testSets.removeItem", { itemId: item.data.id });
+    expect(removed.ok).toBe(true);
+
+    const testCaseDetail = await rpc(tenant.cookie, "GET", "testCases.get", { id: testCaseId });
+    expect(testCaseDetail.data.executions.map((e: any) => e.id)).toContain(started.data.execution.id);
+  });
+
+  test("starting a run rejects a test set item that doesn't match the given test case", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseA = await createTestCase(tenant, productId, "A");
+    const testCaseB = await createTestCase(tenant, productId, "B");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Mismatch" });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: testCaseA, environmentId: env.id });
+
+    const mismatched = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId: testCaseB,
+      environmentId: env.id,
+      testSetItemId: item.data.id,
+    });
+    expect(mismatched.ok).toBe(false);
+    expect(mismatched.error?.message).toMatch(/does not match/);
+  });
+
+  test("a round scopes each item's lastExecution to that round, not the set's all-time history", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const tc1 = await createTestCase(tenant, productId, "First");
+    const tc2 = await createTestCase(tenant, productId, "Second");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Release rounds" });
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc1, environmentId: env.id });
+    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc2, environmentId: env.id });
+
+    // Run item1 with no round selected (ad-hoc, all-time) - this is history a later round
+    // must not inherit.
+    await rpc(tenant.cookie, "POST", "testCases.startExecution", { testCaseId: tc1, environmentId: env.id, testSetItemId: item1.data.id });
+
+    const round1 = await rpc(tenant.cookie, "POST", "testSets.startRound", { testSetId: set.data.id, label: "Release 1" });
+    expect(round1.ok).toBe(true);
+    expect(round1.data.label).toBe("Release 1");
+
+    // Nothing has run *in this round* yet - both items show not-run here even though
+    // item1 has all-time history.
+    let roundDetail = await rpc(tenant.cookie, "GET", "testSets.getRound", { id: round1.data.id });
+    expect(roundDetail.data.items.every((i: any) => i.lastExecution === null)).toBe(true);
+
+    // The set's own all-time view still shows item1's earlier run, untouched by the round.
+    const allTime = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    expect(allTime.data.items.find((i: any) => i.id === item1.data.id).lastExecution).not.toBeNull();
+
+    await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId: tc1,
+      environmentId: env.id,
+      testSetItemId: item1.data.id,
+      testSetRoundId: round1.data.id,
+    });
+
+    roundDetail = await rpc(tenant.cookie, "GET", "testSets.getRound", { id: round1.data.id });
+    const row1 = roundDetail.data.items.find((i: any) => i.id === item1.data.id);
+    const row2 = roundDetail.data.items.find((i: any) => i.id === item2.data.id);
+    expect(row1.lastExecution).not.toBeNull();
+    expect(row2.lastExecution).toBeNull();
+  });
+
+  test("re-running the same item twice within one round keeps only the latest result", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseId = await createTestCase(tenant, productId, "Flaky");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Latest wins" });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+    const round = await rpc(tenant.cookie, "POST", "testSets.startRound", { testSetId: set.data.id });
+
+    const first = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId,
+      environmentId: env.id,
+      testSetItemId: item.data.id,
+      testSetRoundId: round.data.id,
+    });
+    const second = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId,
+      environmentId: env.id,
+      testSetItemId: item.data.id,
+      testSetRoundId: round.data.id,
+    });
+    expect(second.data.execution.id).not.toBe(first.data.execution.id);
+
+    const roundDetail = await rpc(tenant.cookie, "GET", "testSets.getRound", { id: round.data.id });
+    expect(roundDetail.data.items[0].lastExecution.id).toBe(second.data.execution.id);
+  });
+
+  test("listRounds rolls up pass/fail/not-run counts per round using the set's current item count", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const tc1 = await createTestCase(tenant, productId, "One");
+    const tc2 = await createTestCase(tenant, productId, "Two");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Rollup" });
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc1, environmentId: env.id });
+    await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc2, environmentId: env.id });
+
+    const round = await rpc(tenant.cookie, "POST", "testSets.startRound", { testSetId: set.data.id, label: "Release 1" });
+    const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId: tc1,
+      environmentId: env.id,
+      testSetItemId: item1.data.id,
+      testSetRoundId: round.data.id,
+    });
+    await rpc(tenant.cookie, "POST", "testCases.recordStepResult", {
+      testStepExecutionId: started.data.stepExecutions[0].id,
+      actualResult: "ok",
+      status: "pass",
+    });
+    await rpc(tenant.cookie, "POST", "testCases.completeExecution", { executionId: started.data.execution.id });
+
+    const rounds = await rpc(tenant.cookie, "GET", "testSets.listRounds", { testSetId: set.data.id });
+    expect(rounds.ok).toBe(true);
+    expect(rounds.data).toMatchObject([{ id: round.data.id, itemCount: 2, passCount: 1, notRunCount: 1, failCount: 0, blockedCount: 0 }]);
+  });
+
+  test("a set with no round started behaves exactly as before", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
+    const productId = product.data.id;
+    const testCaseId = await createTestCase(tenant, productId, "Ad hoc");
+    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+
+    const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "No rounds" });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+
+    const rounds = await rpc(tenant.cookie, "GET", "testSets.listRounds", { testSetId: set.data.id });
+    expect(rounds.data).toEqual([]);
+
+    const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
+      testCaseId,
+      environmentId: env.id,
+      testSetItemId: item.data.id,
+    });
+    expect(started.ok).toBe(true);
+
+    const detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
+    expect(detail.data.items[0].lastExecution).toMatchObject({ id: started.data.execution.id, status: "in_progress" });
+  });
+});

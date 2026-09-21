@@ -4,8 +4,8 @@ const KEY = "alm4devs:lastLocation";
 
 export interface LastLocation {
   productId: string;
-  artifact: "requirements" | "architecture" | "testCases" | "traceability" | "versions";
-  /** null for traceability/versions, which both span every level at once - see products/[id]/page.tsx. */
+  artifact: "requirements" | "architecture" | "testCases" | "testSets" | "traceability" | "versions";
+  /** null for traceability/versions/testSets, which all span every level at once - see products/[id]/page.tsx. */
   levelId: string | null;
 }
 
@@ -34,6 +34,7 @@ export function getLastLocation(): LastLocation | null {
       parsed.artifact !== "requirements" &&
       parsed.artifact !== "architecture" &&
       parsed.artifact !== "testCases" &&
+      parsed.artifact !== "testSets" &&
       parsed.artifact !== "traceability" &&
       parsed.artifact !== "versions"
     ) {

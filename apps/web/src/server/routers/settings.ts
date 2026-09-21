@@ -291,7 +291,7 @@ export const settingsRouter = router({
    * screens) need. Used from far more than just the settings page, so it isn't nested
    * under a more specific router - see apps/web/src/app/(app)/settings/custom-fields. */
   listCustomFields: protectedProcedure
-    .input(z.object({ entityType: z.enum(["requirement", "test_case"]) }))
+    .input(z.object({ entityType: z.enum(["requirement", "test_case", "test_run"]) }))
     .query(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
       return withTenant(db, tenantId, async (tx) => {
@@ -318,7 +318,7 @@ export const settingsRouter = router({
   createCustomField: protectedProcedure
     .input(
       z.object({
-        entityType: z.enum(["requirement", "test_case"]),
+        entityType: z.enum(["requirement", "test_case", "test_run"]),
         name: z.string().trim().min(1).max(100),
         fieldType: z.enum(CUSTOM_FIELD_TYPE_VALUES),
         isRequired: z.boolean().optional(),

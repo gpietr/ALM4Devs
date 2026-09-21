@@ -9,7 +9,7 @@ import { isUniqueViolation } from "./level-sequences";
  * `customFieldValues` docstrings for the storage design and why values aren't versioned.
  */
 
-export type CustomFieldEntityType = "requirement" | "test_case";
+export type CustomFieldEntityType = "requirement" | "test_case" | "test_run";
 export type CustomFieldType = "short_text" | "long_text" | "list" | "date" | "integer" | "boolean";
 
 export const CUSTOM_FIELD_TYPES: ReadonlyArray<{ value: CustomFieldType; label: string }> = [
@@ -22,7 +22,9 @@ export const CUSTOM_FIELD_TYPES: ReadonlyArray<{ value: CustomFieldType; label: 
 ];
 
 function noun(entityType: CustomFieldEntityType): string {
-  return entityType === "requirement" ? "requirement" : "test case";
+  if (entityType === "requirement") return "requirement";
+  if (entityType === "test_case") return "test case";
+  return "test run";
 }
 
 // --- Default fields, seeded per tenant --------------------------------------------
