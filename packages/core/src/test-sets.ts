@@ -8,10 +8,13 @@ import { DomainError } from "./errors";
  * Test sets: a named, ordered, reusable subset of tests to run. Product-scoped like every
  * other artifact. See schema.ts's testSets/testSetItems docstrings for why an item's `id`
  * is its own primary key (the same test case can be placed in a set more than once, e.g.
- * once per environment) and why custom parameters beyond environment reuse the existing
- * tenant-defined custom-fields system under `entityType: "test_run"` rather than a new
- * table. A run started from an item (test-cases.ts's startExecution, given that item's id)
- * is traced back here via test_executions.testSetItemId - getTestSet surfaces each item's
+ * once per environment) and why its run parameters (Environment and anything else a
+ * tenant defines) reuse the existing tenant-defined custom-fields system under
+ * `entityType: "test_run"` rather than a dedicated column - the caller passes the item's
+ * already-set values along when it starts a run from that item (test-cases.ts's
+ * startExecution), since the execution gets its own copy under the same entityType, keyed
+ * by its own id, not a live reference back to the item's. That execution is traced back
+ * here via test_executions.testSetItemId - getTestSet surfaces each item's
  * most recent one, all-time, as `lastExecution` (getLastExecutionsForItems below), the
  * same "batched, first-seen-per-key wins" pattern traceability.ts's lastExecutionByTestCase
  * already uses, just keyed by item id.
@@ -52,8 +55,6 @@ export interface TestSetItemView {
   testCaseTitle: string;
   testCaseSequenceNumber: number;
   testCaseLevelCode: string;
-  environmentId: string | null;
-  environmentName: string | null;
   customFieldValues: CustomFieldValueView[];
   lastExecution: TestSetItemLastExecution | null;
 }
@@ -147,13 +148,10 @@ async function getTestSetItemRows(db: TenantTx, tenantId: string, testSetId: str
       testCaseTitle: schema.testCases.title,
       testCaseSequenceNumber: schema.testCases.sequenceNumber,
       testCaseLevelCode: schema.levels.code,
-      environmentId: schema.testSetItems.environmentId,
-      environmentName: schema.testEnvironments.name,
     })
     .from(schema.testSetItems)
     .innerJoin(schema.testCases, eq(schema.testSetItems.testCaseId, schema.testCases.id))
     .innerJoin(schema.levels, eq(schema.testCases.levelId, schema.levels.id))
-    .leftJoin(schema.testEnvironments, eq(schema.testSetItems.environmentId, schema.testEnvironments.id))
     .where(and(eq(schema.testSetItems.tenantId, tenantId), eq(schema.testSetItems.testSetId, testSetId)))
     .orderBy(asc(schema.testSetItems.sortOrder));
 }
@@ -215,7 +213,6 @@ async function buildItemViews(
   ]);
   return itemRows.map((r) => ({
     ...r,
-    environmentName: r.environmentName ?? null,
     customFieldValues: customFieldsByItem.get(r.id) ?? [],
     lastExecution: lastExecutionByItem.get(r.id) ?? null,
   }));
@@ -411,7 +408,6 @@ export async function addTestSetItem(
     tenantId: string;
     testSetId: string;
     testCaseId: string;
-    environmentId?: string;
     customFieldValues?: CustomFieldValueInput[];
     createdBy: string;
   },
@@ -443,7 +439,6 @@ export async function addTestSetItem(
       tenantId: params.tenantId,
       testSetId: params.testSetId,
       testCaseId: params.testCaseId,
-      environmentId: params.environmentId ?? null,
       sortOrder: nextSortOrder,
       createdBy: params.createdBy,
     })
@@ -454,36 +449,23 @@ export async function addTestSetItem(
   return item;
 }
 
-/** Changes an existing entry's environment and/or custom parameters in place - not a
- * remove-then-re-add, which would lose its position (`sortOrder`). `environmentId: null`
- * clears it back to "no environment tagged"; `undefined` leaves it untouched. */
+/** Changes an existing entry's run parameters in place - not a remove-then-re-add, which
+ * would lose its position (`sortOrder`). */
 export async function updateTestSetItem(
   db: TenantTx,
   params: {
     tenantId: string;
     itemId: string;
-    environmentId?: string | null;
-    customFieldValues?: CustomFieldValueInput[];
+    customFieldValues: CustomFieldValueInput[];
   },
 ): Promise<{ id: string }> {
-  let item: { id: string } | undefined;
-  if (params.environmentId !== undefined) {
-    [item] = await db
-      .update(schema.testSetItems)
-      .set({ environmentId: params.environmentId })
-      .where(and(eq(schema.testSetItems.id, params.itemId), eq(schema.testSetItems.tenantId, params.tenantId)))
-      .returning({ id: schema.testSetItems.id });
-  } else {
-    [item] = await db
-      .select({ id: schema.testSetItems.id })
-      .from(schema.testSetItems)
-      .where(and(eq(schema.testSetItems.id, params.itemId), eq(schema.testSetItems.tenantId, params.tenantId)));
-  }
+  const [item] = await db
+    .select({ id: schema.testSetItems.id })
+    .from(schema.testSetItems)
+    .where(and(eq(schema.testSetItems.id, params.itemId), eq(schema.testSetItems.tenantId, params.tenantId)));
   if (!item) throw new DomainError("test set item not found");
 
-  if (params.customFieldValues !== undefined) {
-    await setCustomFieldValues(db, params.tenantId, "test_run", item.id, params.customFieldValues);
-  }
+  await setCustomFieldValues(db, params.tenantId, "test_run", item.id, params.customFieldValues);
   return item;
 }
 

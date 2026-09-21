@@ -22,7 +22,6 @@ export default function ExecutionRunPage({
 }) {
   const { id: testCaseId, executionId } = use(params);
   const testCase = trpc.testCases.get.useQuery({ id: testCaseId });
-  const environmentName = testCase.data?.executions.find((e) => e.id === executionId)?.environmentName;
 
   const stepRequirementLinks = new Map(
     (testCase.data?.steps ?? []).map((s) => [
@@ -39,7 +38,6 @@ export default function ExecutionRunPage({
         executionId={executionId}
         testCaseTitle={testCase.data?.testCase.title}
         testCaseDisplayId={testCase.data ? formatItemId(testCase.data.testCase.levelCode, testCase.data.testCase.sequenceNumber) : undefined}
-        environmentName={environmentName}
         coverageLinks={testCase.data?.effectiveRequirementLinks ?? []}
         stepRequirementLinks={stepRequirementLinks}
       />

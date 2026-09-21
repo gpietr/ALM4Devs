@@ -1,6 +1,5 @@
 import {
   seedDefaultArchitectureLevels,
-  seedDefaultEnvironments,
   seedDefaultLevels,
   seedDefaultStatuses,
   seedDefaultTenantSettings,
@@ -12,7 +11,7 @@ import { and, eq, sql } from "drizzle-orm";
 /**
  * Idempotent maintenance script: seeds any per-tenant row a tenant should have from
  * sign-up but might be missing (default requirement_statuses, requirement_levels,
- * tenant_settings, test_levels, test_environments). Exists because of a real incident: a
+ * tenant_settings, test_levels, architecture_levels). Exists because of a real incident: a
  * tenant created before the domain-model migration shipped had zero requirement_statuses
  * rows, since seeding only happened in /api/register's code path - a schema/behavior
  * change that introduces a new per-tenant invariant needs a data backfill for existing
@@ -27,7 +26,7 @@ import { and, eq, sql } from "drizzle-orm";
  * actual seeding writes still go through app_runtime + withTenant, matching how the app
  * writes this data normally.
  *
- * (Each check below is the same shape repeated five times - a candidate for a shared
+ * (Each check below is the same shape repeated four times - a candidate for a shared
  * generic helper, not worth fighting Drizzle's per-table generic types for in a
  * maintenance script that isn't on any user-facing path.)
  *
@@ -100,18 +99,6 @@ async function main() {
   for (const tenant of tenantsMissingArchitectureLevels) {
     await withTenant(appDb, tenant.id, (tx) => seedDefaultArchitectureLevels(tx, tenant.id));
     console.log(`Seeded default architecture levels for tenant "${tenant.name}" (${tenant.id})`);
-    anyFixed = true;
-  }
-
-  const tenantsMissingEnvironments = await adminDb
-    .select({ id: schema.tenants.id, name: schema.tenants.name })
-    .from(schema.tenants)
-    .leftJoin(schema.testEnvironments, eq(schema.testEnvironments.tenantId, schema.tenants.id))
-    .groupBy(schema.tenants.id, schema.tenants.name)
-    .having(sql`count(${schema.testEnvironments.id}) = 0`);
-  for (const tenant of tenantsMissingEnvironments) {
-    await withTenant(appDb, tenant.id, (tx) => seedDefaultEnvironments(tx, tenant.id));
-    console.log(`Seeded default environments for tenant "${tenant.name}" (${tenant.id})`);
     anyFixed = true;
   }
 

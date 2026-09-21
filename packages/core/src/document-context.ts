@@ -57,11 +57,8 @@ export async function buildTestExecutionDocumentContext(db: TenantTx, tenantId: 
   const { execution, stepExecutions } = await getExecutionWithSteps(db, tenantId, executionId);
   const { testCase } = await getTestCaseWithSteps(db, tenantId, execution.testCaseId);
   const level = await getTestLevel(db, tenantId, testCase.levelId);
+  const customFieldValues = await getCustomFieldValues(db, tenantId, "test_run", executionId);
 
-  const [environment] = await db
-    .select({ name: schema.testEnvironments.name })
-    .from(schema.testEnvironments)
-    .where(and(eq(schema.testEnvironments.id, execution.environmentId), eq(schema.testEnvironments.tenantId, tenantId)));
   const [executedByUser] = await db.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, execution.executedBy));
 
   const evidenceByStepExecution = stepExecutions.length
@@ -90,7 +87,10 @@ export async function buildTestExecutionDocumentContext(db: TenantTx, tenantId: 
     generatedAt: nowIso(),
     testCase: { displayId: formatItemId(level.code, testCase.sequenceNumber), title: testCase.title },
     status: execution.status,
-    environment: environment?.name ?? null,
+    customFields: customFieldValues.map((f) => ({
+      name: f.name,
+      value: f.fieldType === "list" ? f.optionLabel : f.value,
+    })),
     executedBy: executedByUser?.name ?? null,
     startedAt: execution.startedAt.toISOString(),
     completedAt: execution.completedAt ? execution.completedAt.toISOString() : null,

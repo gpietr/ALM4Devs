@@ -15,7 +15,6 @@ import {
   getTestLevel,
   listArchitectureDisplayIdsByTestCase,
   listArchitectureLinksForTestCase,
-  listEnvironments,
   listEvidenceForStepExecution,
   listRequirementsForStepSuggestions,
   listSoftwareVersionsForEntities,
@@ -76,11 +75,6 @@ export const testCasesRouter = router({
   listLevels: protectedProcedure.query(async ({ ctx }) => {
     const tenantId = tenantOf(ctx);
     return withTenant(db, tenantId, (tx) => listTestLevels(tx, tenantId));
-  }),
-
-  listEnvironments: protectedProcedure.query(async ({ ctx }) => {
-    const tenantId = tenantOf(ctx);
-    return withTenant(db, tenantId, (tx) => listEnvironments(tx, tenantId));
   }),
 
   /** Every test case in a product regardless of level - mirrors requirements.ts's
@@ -246,10 +240,8 @@ export const testCasesRouter = router({
           status: schema.testExecutions.status,
           startedAt: schema.testExecutions.startedAt,
           completedAt: schema.testExecutions.completedAt,
-          environmentName: schema.testEnvironments.name,
         })
         .from(schema.testExecutions)
-        .innerJoin(schema.testEnvironments, eq(schema.testExecutions.environmentId, schema.testEnvironments.id))
         .where(eq(schema.testExecutions.testCaseId, input.id))
         .orderBy(desc(schema.testExecutions.startedAt));
 
@@ -368,9 +360,9 @@ export const testCasesRouter = router({
     .input(
       z.object({
         testCaseId: z.string().uuid(),
-        environmentId: z.string().uuid(),
         testSetItemId: z.string().uuid().optional(),
         testSetRoundId: z.string().uuid().optional(),
+        customFieldValues: z.array(customFieldValueSchema).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -380,10 +372,10 @@ export const testCasesRouter = router({
         startExecution(tx, {
           tenantId,
           testCaseId: input.testCaseId,
-          environmentId: input.environmentId,
           executedBy: userId,
           testSetItemId: input.testSetItemId,
           testSetRoundId: input.testSetRoundId,
+          customFieldValues: input.customFieldValues as CustomFieldValueInput[] | undefined,
         }),
       ).catch(toBadRequest);
     }),
@@ -403,7 +395,11 @@ export const testCasesRouter = router({
       // Same "join for a display name" pattern as document-context.ts's own executedByUser
       // lookup - execution.executedBy is only a user id, and the run header needs a name.
       const [executedByUser] = await tx.select({ name: schema.user.name }).from(schema.user).where(eq(schema.user.id, execution.executedBy));
-      return { execution: { ...execution, executedByName: executedByUser?.name ?? null }, stepExecutions: stepsWithEvidence };
+      const customFieldValues = await getCustomFieldValues(tx, tenantId, "test_run", input.id);
+      return {
+        execution: { ...execution, executedByName: executedByUser?.name ?? null, customFieldValues },
+        stepExecutions: stepsWithEvidence,
+      };
     });
   }),
 

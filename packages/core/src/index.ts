@@ -21,7 +21,6 @@ export * from "./spira-connection";
 export * from "./status-admin";
 export * from "./tenant-settings";
 export * from "./test-cases";
-export * from "./test-environments";
 export * from "./test-levels";
 export * from "./test-sets";
 export * from "./traceability";

@@ -98,7 +98,6 @@ export const testSetsRouter = router({
       z.object({
         testSetId: z.string().uuid(),
         testCaseId: z.string().uuid(),
-        environmentId: z.string().uuid().optional(),
         customFieldValues: z.array(customFieldValueSchema).optional(),
       }),
     )
@@ -110,7 +109,6 @@ export const testSetsRouter = router({
           tenantId,
           testSetId: input.testSetId,
           testCaseId: input.testCaseId,
-          environmentId: input.environmentId,
           customFieldValues: input.customFieldValues as CustomFieldValueInput[] | undefined,
           createdBy: userId,
         }),
@@ -121,8 +119,7 @@ export const testSetsRouter = router({
     .input(
       z.object({
         itemId: z.string().uuid(),
-        environmentId: z.string().uuid().nullable().optional(),
-        customFieldValues: z.array(customFieldValueSchema).optional(),
+        customFieldValues: z.array(customFieldValueSchema),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -131,8 +128,7 @@ export const testSetsRouter = router({
         updateTestSetItem(tx, {
           tenantId,
           itemId: input.itemId,
-          environmentId: input.environmentId,
-          customFieldValues: input.customFieldValues as CustomFieldValueInput[] | undefined,
+          customFieldValues: input.customFieldValues as CustomFieldValueInput[],
         }),
       ).catch(toBadRequest);
     }),

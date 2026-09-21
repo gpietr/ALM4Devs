@@ -1,5 +1,6 @@
 "use client";
 
+import { formatCustomFieldValue } from "@/components/custom-fields";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
 import { ResultSquare } from "@/components/context-rail";
 import { ResultBadge } from "@/components/result-badge";
@@ -35,7 +36,6 @@ export function TestRunView({
   executionId,
   testCaseTitle,
   testCaseDisplayId,
-  environmentName,
   coverageLinks,
   stepRequirementLinks,
 }: {
@@ -43,7 +43,6 @@ export function TestRunView({
   executionId: string;
   testCaseTitle?: string;
   testCaseDisplayId?: string;
-  environmentName?: string;
   /** The test case's effective requirement coverage (union of case- and step-level
    * links) - shown once in the roster's "Snapshot" note, same "Covers" grammar as the
    * test case detail page. */
@@ -74,9 +73,16 @@ export function TestRunView({
   const recordedCount = stepExecutions.filter((se) => se.status !== "not_run").length;
   const allRecorded = stepExecutions.length > 0 && recordedCount === stepExecutions.length;
 
+  // Test run parameters (Environment and anything else a tenant has defined) - same
+  // "Name: value" summary grammar as test-sets/[id]/page.tsx's item paramsSummary.
+  const paramsSummary = execution.customFieldValues
+    .filter((v) => v.value != null)
+    .map((v) => `${v.name}: ${formatCustomFieldValue(v)}`)
+    .join(" · ");
+
   const metaParts = [
     testCaseDisplayId,
-    environmentName,
+    paramsSummary || undefined,
     `started ${new Date(execution.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
     execution.executedByName ?? undefined,
   ].filter((p): p is string => Boolean(p));

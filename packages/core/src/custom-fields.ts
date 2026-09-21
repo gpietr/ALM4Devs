@@ -53,10 +53,30 @@ const DEFAULT_TEST_CASE_CUSTOM_FIELDS: ReadonlyArray<{
   options: readonly string[];
 }> = [{ name: "Test Type", fieldType: "list", isRequired: true, options: ["Verification", "Validation"] }];
 
+/** Environment used to be a dedicated table + FK column (test_executions/test_set_items
+ * both had one) requiring exactly this one parameter before a run could start. It's an
+ * ordinary "test run" custom field now, like any other run parameter a tenant might want
+ * (device, build number, tester, ...) - seeded here so new tenants still get it without
+ * configuring anything, but a tenant can rename it, add options, make it optional, or
+ * delete it outright exactly like Test Type above. Existing tenants' pre-removal
+ * environment data was migrated into this same field by
+ * migrations-manual/022_remove_test_environments.sql - this seed only covers tenants
+ * created after that migration ran. */
+const DEFAULT_TEST_RUN_CUSTOM_FIELDS: ReadonlyArray<{
+  name: string;
+  fieldType: CustomFieldType;
+  isRequired: boolean;
+  options: readonly string[];
+}> = [{ name: "Environment", fieldType: "list", isRequired: true, options: ["Default"] }];
+
 /** Called once, right after a tenant is created (see apps/web/src/app/api/register) -
  * same convention as seedDefaultStatuses/seedDefaultLevels. */
 export async function seedDefaultCustomFields(db: TenantTx, tenantId: string): Promise<void> {
-  for (const spec of [...DEFAULT_REQUIREMENT_CUSTOM_FIELDS.map((f) => ({ ...f, entityType: "requirement" as const })), ...DEFAULT_TEST_CASE_CUSTOM_FIELDS.map((f) => ({ ...f, entityType: "test_case" as const }))]) {
+  for (const spec of [
+    ...DEFAULT_REQUIREMENT_CUSTOM_FIELDS.map((f) => ({ ...f, entityType: "requirement" as const })),
+    ...DEFAULT_TEST_CASE_CUSTOM_FIELDS.map((f) => ({ ...f, entityType: "test_case" as const })),
+    ...DEFAULT_TEST_RUN_CUSTOM_FIELDS.map((f) => ({ ...f, entityType: "test_run" as const })),
+  ]) {
     const field = await createCustomFieldDefinition(db, tenantId, {
       entityType: spec.entityType,
       name: spec.name,

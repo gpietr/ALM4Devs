@@ -168,7 +168,6 @@ export function TraceabilitySection({ productId }: { productId: string }) {
       "Test Case ID",
       "Test Case",
       "Last Execution",
-      "Environment",
       "Status",
       ...(visible.has("reqVersions") ? ["Req: Versions"] : []),
       ...(visible.has("tcVersions") ? ["TC: Versions"] : []),
@@ -182,7 +181,6 @@ export function TraceabilitySection({ productId }: { productId: string }) {
       r.testCaseId ? formatItemId(r.testCaseLevelCode!, r.testCaseSequenceNumber!) : "",
       r.testCaseTitle ?? "Not covered",
       r.lastExecutionStartedAt ? new Date(r.lastExecutionStartedAt).toLocaleString() : "",
-      r.lastExecutionEnvironmentName ?? "",
       r.lastExecutionStatus ?? (r.testCaseId ? "Not run" : ""),
       ...(visible.has("reqVersions") ? [r.requirementSoftwareVersions.map((v) => v.versionNumber).join(", ")] : []),
       ...(visible.has("tcVersions") ? [r.testCaseSoftwareVersions.map((v) => v.versionNumber).join(", ")] : []),
@@ -394,10 +392,7 @@ export function TraceabilitySection({ productId }: { productId: string }) {
                   {visible.has("lastExecution") && (
                     <TableCell className="text-muted-foreground">
                       {row.lastExecutionStartedAt ? (
-                        <>
-                          {new Date(row.lastExecutionStartedAt).toLocaleDateString()}
-                          {row.lastExecutionEnvironmentName ? ` · ${row.lastExecutionEnvironmentName}` : ""}
-                        </>
+                        new Date(row.lastExecutionStartedAt).toLocaleDateString()
                       ) : row.testCaseId ? (
                         "Never run"
                       ) : (

@@ -3,7 +3,6 @@ import {
   createArchitectureLevel,
   createCustomFieldDefinition,
   createCustomFieldListOption,
-  createEnvironment,
   createLevel,
   createTestLevel,
   deleteArchitectureLevel,
@@ -12,27 +11,23 @@ import {
   type CustomFieldType,
   deleteCustomFieldDefinition,
   deleteCustomFieldListOption,
-  deleteEnvironment,
   deleteLevel,
   deleteTestLevel,
   getTenantSettings,
   listAllStatuses,
   listArchitectureLevels,
   listCustomFieldDefinitions,
-  listEnvironments,
   listLevels,
   listTestLevels,
   renameArchitectureLevel,
   renameCustomFieldDefinition,
   renameCustomFieldListOption,
-  renameEnvironment,
   renameLevel,
   renameStatus,
   renameTestLevel,
   reorderArchitectureLevel,
   reorderCustomFieldDefinition,
   reorderCustomFieldListOption,
-  reorderEnvironment,
   reorderLevel,
   reorderStatus,
   reorderTestLevel,
@@ -63,15 +58,14 @@ export const settingsRouter = router({
   get: protectedProcedure.query(async ({ ctx }) => {
     const tenantId = tenantOf(ctx);
     return withTenant(db, tenantId, async (tx) => {
-      const [approval, statuses, levels, testLevels, architectureLevels, environments] = await Promise.all([
+      const [approval, statuses, levels, testLevels, architectureLevels] = await Promise.all([
         getTenantSettings(tx, tenantId),
         listAllStatuses(tx, tenantId),
         listLevels(tx, tenantId),
         listTestLevels(tx, tenantId),
         listArchitectureLevels(tx, tenantId),
-        listEnvironments(tx, tenantId),
       ]);
-      return { approval, statuses, levels, testLevels, architectureLevels, environments };
+      return { approval, statuses, levels, testLevels, architectureLevels };
     });
   }),
 
@@ -245,41 +239,6 @@ export const settingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
       await withTenant(db, tenantId, (tx) => deleteArchitectureLevel(tx, tenantId, input.levelId)).catch(
-        toBadRequest,
-      );
-      return { ok: true };
-    }),
-
-  createEnvironment: protectedProcedure
-    .input(z.object({ name: z.string().trim().min(1).max(100) }))
-    .mutation(async ({ ctx, input }) => {
-      const tenantId = tenantOf(ctx);
-      return withTenant(db, tenantId, (tx) => createEnvironment(tx, tenantId, input.name)).catch(toBadRequest);
-    }),
-
-  renameEnvironment: protectedProcedure
-    .input(z.object({ environmentId: z.string().uuid(), name: z.string().trim().min(1).max(100) }))
-    .mutation(async ({ ctx, input }) => {
-      const tenantId = tenantOf(ctx);
-      return withTenant(db, tenantId, (tx) =>
-        renameEnvironment(tx, tenantId, input.environmentId, input.name),
-      ).catch(toBadRequest);
-    }),
-
-  reorderEnvironment: protectedProcedure
-    .input(z.object({ environmentId: z.string().uuid(), direction: z.enum(["up", "down"]) }))
-    .mutation(async ({ ctx, input }) => {
-      const tenantId = tenantOf(ctx);
-      return withTenant(db, tenantId, (tx) =>
-        reorderEnvironment(tx, tenantId, input.environmentId, input.direction),
-      ).catch(toBadRequest);
-    }),
-
-  deleteEnvironment: protectedProcedure
-    .input(z.object({ environmentId: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      const tenantId = tenantOf(ctx);
-      await withTenant(db, tenantId, (tx) => deleteEnvironment(tx, tenantId, input.environmentId)).catch(
         toBadRequest,
       );
       return { ok: true };

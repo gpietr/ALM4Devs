@@ -44,11 +44,6 @@ const SECTIONS: ReadonlyArray<{
         title: "Test case levels",
         description: "Organize test cases the same way as requirements.",
       },
-      {
-        href: "/settings/environments",
-        title: "Environments",
-        description: "Recorded on every test execution (Staging, Simulator, …).",
-      },
     ],
   },
   {
@@ -57,7 +52,7 @@ const SECTIONS: ReadonlyArray<{
       {
         href: "/settings/custom-fields",
         title: "Custom fields",
-        description: "Extra fields on every requirement or test case.",
+        description: "Extra fields on every requirement, test case, or test run.",
       },
       {
         href: "/settings/document-templates",

@@ -58,11 +58,6 @@ const NAV_GROUPS: ReadonlyArray<{
         label: "Test case levels",
         match: (p) => p === "/settings/test-levels",
       },
-      {
-        href: "/settings/environments",
-        label: "Environments",
-        match: (p) => p === "/settings/environments",
-      },
     ],
   },
   {

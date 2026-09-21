@@ -15,7 +15,6 @@ export interface TraceabilityRow {
   testCaseLevelCode: string | null;
   lastExecutionStatus: string | null;
   lastExecutionStartedAt: Date | null;
-  lastExecutionEnvironmentName: string | null;
   /** For the matrix's configurable columns (see the column picker on the
    * traceability tab) - the requirement's own values, and (when this row does have a
    * covering test case) that test case's. Empty, not null, when there's no covering test
@@ -121,10 +120,8 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
             testCaseId: schema.testExecutions.testCaseId,
             status: schema.testExecutions.status,
             startedAt: schema.testExecutions.startedAt,
-            environmentName: schema.testEnvironments.name,
           })
           .from(schema.testExecutions)
-          .innerJoin(schema.testEnvironments, eq(schema.testExecutions.environmentId, schema.testEnvironments.id))
           .where(and(eq(schema.testExecutions.tenantId, tenantId), inArray(schema.testExecutions.testCaseId, allTestCaseIds)))
           .orderBy(desc(schema.testExecutions.startedAt));
   // Executions are ordered newest-first, so the first one seen per test case is its most
@@ -150,7 +147,6 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
         testCaseLevelCode: null,
         lastExecutionStatus: null,
         lastExecutionStartedAt: null,
-        lastExecutionEnvironmentName: null,
         requirementCustomFieldValues: requirementCustomFieldsById.get(req.id) ?? [],
         testCaseCustomFieldValues: [],
         requirementSoftwareVersions: requirementSoftwareVersionsById.get(req.id) ?? [],
@@ -173,7 +169,6 @@ export async function getTraceabilityMatrix(db: TenantTx, tenantId: string, prod
         testCaseLevelCode: testCase?.levelCode ?? null,
         lastExecutionStatus: lastExecution?.status ?? null,
         lastExecutionStartedAt: lastExecution?.startedAt ?? null,
-        lastExecutionEnvironmentName: lastExecution?.environmentName ?? null,
         requirementCustomFieldValues: requirementCustomFieldsById.get(req.id) ?? [],
         testCaseCustomFieldValues: testCaseCustomFieldsById.get(testCaseId) ?? [],
         requirementSoftwareVersions: requirementSoftwareVersionsById.get(req.id) ?? [],

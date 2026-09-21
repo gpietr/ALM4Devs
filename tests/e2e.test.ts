@@ -101,6 +101,22 @@ async function uploadAttachment(
   return { status: res.status, ok: res.ok, id: body.id, url: body.url };
 }
 
+/** Environment used to be its own dedicated table/FK; it's an ordinary "test run" custom
+ * field now (seeded by default for every tenant, see custom-fields.ts's
+ * seedDefaultCustomFields), required on every execution the same way the old column was.
+ * Every test that used to fetch an environment id and pass `environmentId` now fetches
+ * this field's id + its (also seeded) "Default" option id and passes it as
+ * `customFieldValues` instead - same required-parameter shape, just generalized. */
+async function defaultRunParam(cookie: string): Promise<{ fieldId: string; value: string }> {
+  const fields = (await rpc(cookie, "GET", "settings.listCustomFields", { entityType: "test_run" })).data as Array<{
+    id: string;
+    name: string;
+    options: Array<{ id: string; value: string }>;
+  }>;
+  const field = fields.find((f) => f.name === "Environment")!;
+  return { fieldId: field.id, value: field.options[0]!.id };
+}
+
 /** Calls the raw PDF-generation route (backlog item 9.29) - a binary response, so this
  * doesn't go through `rpc()`. Reads the response as bytes regardless of outcome (an error
  * response is JSON, a success is a PDF) so callers can check either shape. */
@@ -756,12 +772,13 @@ describe("e2e: audit trail integrity (direct database checks)", () => {
 });
 
 describe("e2e: test cases", () => {
-  test("registering seeds one default test level and one default environment", async () => {
+  test("registering seeds one default test level and one default (Environment) test run field", async () => {
     const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
     const levels = await rpc(tenant.cookie, "GET", "testCases.listLevels");
     expect(levels.data.map((l: any) => l.name)).toEqual(["Default"]);
-    const environments = await rpc(tenant.cookie, "GET", "testCases.listEnvironments");
-    expect(environments.data.map((e: any) => e.name)).toEqual(["Default"]);
+    const fields = await rpc(tenant.cookie, "GET", "settings.listCustomFields", { entityType: "test_run" });
+    expect(fields.data.map((f: any) => f.name)).toEqual(["Environment"]);
+    expect(fields.data[0].options.map((o: any) => o.value)).toEqual(["Default"]);
   });
 
   test("a step-level requirement link makes the test case effectively linked too, and rich text is sanitized", async () => {
@@ -817,7 +834,6 @@ describe("e2e: test cases", () => {
     const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
-    const environment = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
 
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
@@ -833,7 +849,7 @@ describe("e2e: test cases", () => {
 
     const execution = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [await defaultRunParam(tenant.cookie)],
     });
     expect(execution.data.stepExecutions.length).toBe(3);
     const [s1, s2, s3] = execution.data.stepExecutions;
@@ -879,7 +895,6 @@ describe("e2e: test cases", () => {
 
     const product = await rpc(tenantA.cookie, "POST", "products.create", { name: "P" });
     const testLevel = (await rpc(tenantA.cookie, "GET", "testCases.listLevels")).data[0];
-    const environment = (await rpc(tenantA.cookie, "GET", "testCases.listEnvironments")).data[0];
     const testCase = await rpc(tenantA.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
@@ -889,7 +904,7 @@ describe("e2e: test cases", () => {
     });
     const execution = await rpc(tenantA.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [await defaultRunParam(tenantA.cookie)],
     });
     const stepExecutionId = execution.data.stepExecutions[0].id;
 
@@ -1028,7 +1043,6 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
-    const environment = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
@@ -1038,7 +1052,7 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
     });
     await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [await defaultRunParam(tenant.cookie)],
     });
 
     const blocked = await rpc(tenant.cookie, "POST", "testCases.delete", { id: testCase.data.testCase.id });
@@ -1159,7 +1173,7 @@ describe("e2e: deleting requirements and test cases (backlog item 9.27)", () => 
   });
 });
 
-describe("e2e: settings - managing test levels and environments", () => {
+describe("e2e: settings - managing test levels", () => {
   test("create, rename, reorder a test level; a level in use cannot be deleted", async () => {
     const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
     const created = await rpc(tenant.cookie, "POST", "settings.createTestLevel", { name: "Regression", code: "REGRESSION" });
@@ -1188,18 +1202,6 @@ describe("e2e: settings - managing test levels and environments", () => {
     const blocked = await rpc(tenant.cookie, "POST", "settings.deleteTestLevel", { levelId: created.data.id });
     expect(blocked.ok).toBe(false);
     expect(blocked.error?.message).toMatch(/test cases using it/);
-  });
-
-  test("the last remaining environment cannot be deleted; an unused one can", async () => {
-    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
-    const onlyOne = (await rpc(tenant.cookie, "GET", "settings.get")).data.environments[0];
-    const lastDelete = await rpc(tenant.cookie, "POST", "settings.deleteEnvironment", { environmentId: onlyOne.id });
-    expect(lastDelete.ok).toBe(false);
-    expect(lastDelete.error?.message).toMatch(/only remaining environment/);
-
-    const extra = await rpc(tenant.cookie, "POST", "settings.createEnvironment", { name: "Staging" });
-    const deleted = await rpc(tenant.cookie, "POST", "settings.deleteEnvironment", { environmentId: extra.data.id });
-    expect(deleted.ok).toBe(true);
   });
 });
 
@@ -1719,7 +1721,7 @@ describe("e2e: document generation (backlog item 9.29)", () => {
 
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
-    const environment = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const environment = await defaultRunParam(tenant.cookie);
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
@@ -1729,7 +1731,7 @@ describe("e2e: document generation (backlog item 9.29)", () => {
     });
     const execution = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [environment],
     });
     await rpc(tenant.cookie, "POST", "testCases.recordStepResult", {
       testStepExecutionId: execution.data.stepExecutions[0].id,
@@ -1960,7 +1962,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
-    const environment = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const environment = await defaultRunParam(tenant.cookie);
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
@@ -1970,7 +1972,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     });
     const execution = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [environment],
     });
     const executionTemplate = await rpc(tenant.cookie, "POST", "documentTemplates.create", {
       scope: "test_execution",
@@ -2005,7 +2007,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
-    const environment = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const environment = await defaultRunParam(tenant.cookie);
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
@@ -2015,7 +2017,7 @@ describe("e2e: live template preview (backlog item 9.30)", () => {
     });
     const execution = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [environment],
     });
 
     const tcList = await rpc(tenant.cookie, "GET", "documentTemplates.listExampleTestCases");
@@ -2163,7 +2165,7 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     });
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const testLevel = (await rpc(tenant.cookie, "GET", "testCases.listLevels")).data[0];
-    const environment = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const environment = await defaultRunParam(tenant.cookie);
     const testCase = await rpc(tenant.cookie, "POST", "testCases.create", {
       productId: product.data.id,
       levelId: testLevel.id,
@@ -2173,11 +2175,11 @@ describe("e2e: filename templates and bulk generation (backlog items 9.31/9.32)"
     });
     const ex1 = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [environment],
     });
     const ex2 = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCase.data.testCase.id,
-      environmentId: environment.id,
+      customFieldValues: [environment],
     });
 
     const result = await generateBulkDocument(tenant.cookie, {
@@ -3906,8 +3908,11 @@ describe("e2e: test sets", () => {
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const productId = product.data.id;
     const testCaseId = await createTestCase(tenant, productId, "Login works");
-    const defaultEnv = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
-    const vmEnv = await rpc(tenant.cookie, "POST", "settings.createEnvironment", { name: "VM" });
+    const defaultParam = await defaultRunParam(tenant.cookie);
+    const vmOption = await rpc(tenant.cookie, "POST", "settings.createCustomFieldOption", {
+      fieldId: defaultParam.fieldId,
+      value: "VM",
+    });
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Cross-env" });
     const testSetId = set.data.id;
@@ -3915,13 +3920,13 @@ describe("e2e: test sets", () => {
     const onDefault = await rpc(tenant.cookie, "POST", "testSets.addItem", {
       testSetId,
       testCaseId,
-      environmentId: defaultEnv.id,
+      customFieldValues: [defaultParam],
     });
     expect(onDefault.ok).toBe(true);
     const onVm = await rpc(tenant.cookie, "POST", "testSets.addItem", {
       testSetId,
       testCaseId,
-      environmentId: vmEnv.data.id,
+      customFieldValues: [{ fieldId: defaultParam.fieldId, value: vmOption.data.id }],
     });
     expect(onVm.ok).toBe(true);
     expect(onVm.data.id).not.toBe(onDefault.data.id);
@@ -3929,7 +3934,7 @@ describe("e2e: test sets", () => {
     const detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: testSetId });
     expect(detail.data.items).toHaveLength(2);
     expect(detail.data.items.every((i: any) => i.testCaseId === testCaseId)).toBe(true);
-    expect(detail.data.items.map((i: any) => i.environmentName)).toEqual(["Default", "VM"]);
+    expect(detail.data.items.map((i: any) => i.customFieldValues[0].optionLabel)).toEqual(["Default", "VM"]);
 
     const listed = await rpc(tenant.cookie, "GET", "testSets.listByProduct", { productId });
     expect(listed.data[0].itemCount).toBe(2);
@@ -3940,6 +3945,7 @@ describe("e2e: test sets", () => {
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const productId = product.data.id;
     const testCaseId = await createTestCase(tenant, productId, "Checkout works");
+    const envParam = await defaultRunParam(tenant.cookie);
     const browserField = await rpc(tenant.cookie, "POST", "settings.createCustomField", {
       entityType: "test_run",
       name: "Browser",
@@ -3948,24 +3954,30 @@ describe("e2e: test sets", () => {
     expect(browserField.ok).toBe(true);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Browsers" });
+    // Environment is required too - every save resends the full set of parameter values,
+    // same "no partial patch" convention the requirement/test-case custom field forms use.
     const added = await rpc(tenant.cookie, "POST", "testSets.addItem", {
       testSetId: set.data.id,
       testCaseId,
-      customFieldValues: [{ fieldId: browserField.data.id, value: "Firefox" }],
+      customFieldValues: [envParam, { fieldId: browserField.data.id, value: "Firefox" }],
     });
     expect(added.ok).toBe(true);
 
     let detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
-    expect(detail.data.items[0].customFieldValues).toMatchObject([{ fieldId: browserField.data.id, value: "Firefox" }]);
+    expect(detail.data.items[0].customFieldValues).toContainEqual(
+      expect.objectContaining({ fieldId: browserField.data.id, value: "Firefox" }),
+    );
 
     const updated = await rpc(tenant.cookie, "POST", "testSets.updateItem", {
       itemId: added.data.id,
-      customFieldValues: [{ fieldId: browserField.data.id, value: "Chrome" }],
+      customFieldValues: [envParam, { fieldId: browserField.data.id, value: "Chrome" }],
     });
     expect(updated.ok).toBe(true);
 
     detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
-    expect(detail.data.items[0].customFieldValues).toMatchObject([{ fieldId: browserField.data.id, value: "Chrome" }]);
+    expect(detail.data.items[0].customFieldValues).toContainEqual(
+      expect.objectContaining({ fieldId: browserField.data.id, value: "Chrome" }),
+    );
   });
 
   test("entries can be reordered and removed", async () => {
@@ -3976,11 +3988,12 @@ describe("e2e: test sets", () => {
     const tc2 = await createTestCase(tenant, productId, "Second");
     const tc3 = await createTestCase(tenant, productId, "Third");
 
+    const envParam = await defaultRunParam(tenant.cookie);
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Ordered" });
     const testSetId = set.data.id;
-    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc1 });
-    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc2 });
-    const item3 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc3 });
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc1, customFieldValues: [envParam] });
+    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc2, customFieldValues: [envParam] });
+    const item3 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId, testCaseId: tc3, customFieldValues: [envParam] });
 
     let detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: testSetId });
     expect(detail.data.items.map((i: any) => i.testCaseId)).toEqual([tc1, tc2, tc3]);
@@ -4021,13 +4034,13 @@ describe("e2e: test sets", () => {
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const productId = product.data.id;
     const testCaseId = await createTestCase(tenant, productId, "Login works");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Regression" });
     const item = await rpc(tenant.cookie, "POST", "testSets.addItem", {
       testSetId: set.data.id,
       testCaseId,
-      environmentId: env.id,
+      customFieldValues: [env],
     });
 
     let detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
@@ -4035,7 +4048,7 @@ describe("e2e: test sets", () => {
 
     const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item.data.id,
     });
     expect(started.ok).toBe(true);
@@ -4070,15 +4083,15 @@ describe("e2e: test sets", () => {
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const productId = product.data.id;
     const testCaseId = await createTestCase(tenant, productId, "Cross-env test");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Cross-env" });
-    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
-    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, customFieldValues: [env] });
+    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, customFieldValues: [env] });
 
     await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item1.data.id,
     });
 
@@ -4094,13 +4107,13 @@ describe("e2e: test sets", () => {
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const productId = product.data.id;
     const testCaseId = await createTestCase(tenant, productId, "To be removed");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Temp set" });
-    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, customFieldValues: [env] });
     const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item.data.id,
     });
     expect(started.ok).toBe(true);
@@ -4118,14 +4131,14 @@ describe("e2e: test sets", () => {
     const productId = product.data.id;
     const testCaseA = await createTestCase(tenant, productId, "A");
     const testCaseB = await createTestCase(tenant, productId, "B");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Mismatch" });
-    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: testCaseA, environmentId: env.id });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: testCaseA, customFieldValues: [env] });
 
     const mismatched = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: testCaseB,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item.data.id,
     });
     expect(mismatched.ok).toBe(false);
@@ -4138,15 +4151,15 @@ describe("e2e: test sets", () => {
     const productId = product.data.id;
     const tc1 = await createTestCase(tenant, productId, "First");
     const tc2 = await createTestCase(tenant, productId, "Second");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Release rounds" });
-    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc1, environmentId: env.id });
-    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc2, environmentId: env.id });
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc1, customFieldValues: [env] });
+    const item2 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc2, customFieldValues: [env] });
 
     // Run item1 with no round selected (ad-hoc, all-time) - this is history a later round
     // must not inherit.
-    await rpc(tenant.cookie, "POST", "testCases.startExecution", { testCaseId: tc1, environmentId: env.id, testSetItemId: item1.data.id });
+    await rpc(tenant.cookie, "POST", "testCases.startExecution", { testCaseId: tc1, customFieldValues: [env], testSetItemId: item1.data.id });
 
     const round1 = await rpc(tenant.cookie, "POST", "testSets.startRound", { testSetId: set.data.id, label: "Release 1" });
     expect(round1.ok).toBe(true);
@@ -4163,7 +4176,7 @@ describe("e2e: test sets", () => {
 
     await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: tc1,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item1.data.id,
       testSetRoundId: round1.data.id,
     });
@@ -4180,21 +4193,21 @@ describe("e2e: test sets", () => {
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const productId = product.data.id;
     const testCaseId = await createTestCase(tenant, productId, "Flaky");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Latest wins" });
-    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, customFieldValues: [env] });
     const round = await rpc(tenant.cookie, "POST", "testSets.startRound", { testSetId: set.data.id });
 
     const first = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item.data.id,
       testSetRoundId: round.data.id,
     });
     const second = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item.data.id,
       testSetRoundId: round.data.id,
     });
@@ -4210,16 +4223,16 @@ describe("e2e: test sets", () => {
     const productId = product.data.id;
     const tc1 = await createTestCase(tenant, productId, "One");
     const tc2 = await createTestCase(tenant, productId, "Two");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "Rollup" });
-    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc1, environmentId: env.id });
-    await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc2, environmentId: env.id });
+    const item1 = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc1, customFieldValues: [env] });
+    await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId: tc2, customFieldValues: [env] });
 
     const round = await rpc(tenant.cookie, "POST", "testSets.startRound", { testSetId: set.data.id, label: "Release 1" });
     const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId: tc1,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item1.data.id,
       testSetRoundId: round.data.id,
     });
@@ -4240,17 +4253,17 @@ describe("e2e: test sets", () => {
     const product = await rpc(tenant.cookie, "POST", "products.create", { name: "P" });
     const productId = product.data.id;
     const testCaseId = await createTestCase(tenant, productId, "Ad hoc");
-    const env = (await rpc(tenant.cookie, "GET", "testCases.listEnvironments")).data[0];
+    const env = await defaultRunParam(tenant.cookie);
 
     const set = await rpc(tenant.cookie, "POST", "testSets.create", { productId, name: "No rounds" });
-    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, environmentId: env.id });
+    const item = await rpc(tenant.cookie, "POST", "testSets.addItem", { testSetId: set.data.id, testCaseId, customFieldValues: [env] });
 
     const rounds = await rpc(tenant.cookie, "GET", "testSets.listRounds", { testSetId: set.data.id });
     expect(rounds.data).toEqual([]);
 
     const started = await rpc(tenant.cookie, "POST", "testCases.startExecution", {
       testCaseId,
-      environmentId: env.id,
+      customFieldValues: [env],
       testSetItemId: item.data.id,
     });
     expect(started.ok).toBe(true);

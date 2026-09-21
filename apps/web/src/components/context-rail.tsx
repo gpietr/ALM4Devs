@@ -2,8 +2,13 @@
 
 import { AiStepAssistBody } from "@/components/ai-tools-panel";
 import type { RequirementOption } from "@/components/requirement-picker";
+import {
+  asCustomFieldDefinitions,
+  type CustomFieldFormState,
+  CustomFieldInputs,
+  toCustomFieldValuesInput,
+} from "@/components/custom-fields";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { StepDraft } from "@/components/test-steps-editor";
 import { trpc } from "@/lib/trpc-client";
 import { cn } from "cn";
@@ -35,7 +40,6 @@ export interface RailExecution {
   status: string;
   startedAt: string | Date;
   completedAt: string | Date | null;
-  environmentName: string;
 }
 
 /**
@@ -148,8 +152,14 @@ function RunTab({
 }) {
   const router = useRouter();
   const utils = trpc.useUtils();
-  const environments = trpc.testCases.listEnvironments.useQuery();
-  const [environmentId, setEnvironmentId] = useState("");
+  // "Test run parameters" - ordinary tenant-defined custom fields (entityType
+  // "test_run"), same system a test set item's own params popover already uses. There's
+  // no dedicated Environment field/picker anymore - if a tenant wants one, it's just one
+  // of these (seeded by default, see custom-fields.ts's seedDefaultCustomFields), same as
+  // any other field a tenant might delete, rename, or add options to.
+  const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_run" });
+  const customFields = asCustomFieldDefinitions(customFieldsQuery.data ?? []);
+  const [customFieldState, setCustomFieldState] = useState<CustomFieldFormState>({});
   const startExecution = trpc.testCases.startExecution.useMutation({
     onSuccess: ({ execution }) => {
       utils.testCases.get.invalidate({ id: testCaseId });
@@ -165,7 +175,7 @@ function RunTab({
     return (
       <div className="space-y-2.5 border border-border bg-card p-3">
         <p className="text-[13px] text-muted-foreground">
-          Run in progress{openExecution.environmentName ? ` · ${openExecution.environmentName}` : ""} · started{" "}
+          Run in progress · started{" "}
           {new Date(openExecution.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </p>
         <Link href={`/test-cases/${testCaseId}/executions/${openExecution.id}`} className={buttonVariants({ className: "w-full" })}>
@@ -177,29 +187,21 @@ function RunTab({
 
   return (
     <div className="space-y-2.5 border border-border bg-card p-3">
-      <p className="text-[13px] text-muted-foreground">Environment</p>
-      <Select value={environmentId} onValueChange={(v) => setEnvironmentId(v ?? "")}>
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="Select environment" />
-        </SelectTrigger>
-        <SelectContent>
-          {environments.data?.map((env) => (
-            <SelectItem key={env.id} value={env.id}>
-              {env.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <CustomFieldInputs
+        fields={customFields}
+        state={customFieldState}
+        onChange={(fieldId, value) => setCustomFieldState((s) => ({ ...s, [fieldId]: value }))}
+      />
       <Button
         className="w-full"
-        disabled={!environmentId || startExecution.isPending}
+        disabled={startExecution.isPending}
         onClick={() => {
           // Same guard the old inline "Run test" card had - a run snapshots the
           // *persisted* steps, not whatever's unsaved in the editor right now.
           if (isDirty && !window.confirm("You have unsaved changes on this test case. Start the run without saving them?")) {
             return;
           }
-          startExecution.mutate({ testCaseId, environmentId });
+          startExecution.mutate({ testCaseId, customFieldValues: toCustomFieldValuesInput(customFieldState) });
         }}
       >
         {startExecution.isPending ? "Starting…" : "Start run"}
@@ -222,9 +224,7 @@ function HistoryTab({ testCaseId, executions }: { testCaseId: string; executions
           href={`/test-cases/${testCaseId}/executions/${ex.id}`}
           className="flex items-center justify-between border-b border-border py-1.5 text-[13.5px] hover:bg-primary/6"
         >
-          <span>
-            {new Date(ex.startedAt).toLocaleDateString()} · {ex.environmentName}
-          </span>
+          <span>{new Date(ex.startedAt).toLocaleDateString()}</span>
           <span className="flex items-center gap-1.5">
             <ResultSquare status={ex.status} />
             <span className="text-xs text-muted-foreground">{ex.status.replaceAll("_", " ")}</span>

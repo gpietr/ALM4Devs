@@ -336,27 +336,29 @@ export const approvalEvents = pgTable("approval_events", {
 // --- Test cases, steps, execution, and the file registry backing both evidence and ------
 // --- rich-text embedded images (backlog item 4) -----------------------------------------
 //
-// Test levels (kind='test' in the shared `levels` table above) and environments follow
-// the same "tenant-owned rows, not a fixed enum" pattern as requirement levels - a team's
-// own test-organization scheme and environment names are preference, not a regulatory
-// constant. Unlike requirement levels (seeded with 3 defaults), test levels seed with a
-// single "Default" row, matching how most teams start before they need more than one.
+// Test levels (kind='test' in the shared `levels` table above) follow the same
+// "tenant-owned rows, not a fixed enum" pattern as requirement levels - a team's own
+// test-organization scheme is preference, not a regulatory constant. Unlike requirement
+// levels (seeded with 3 defaults), test levels seed with a single "Default" row, matching
+// how most teams start before they need more than one.
+//
+// There used to be a dedicated `test_environments` table + `environmentId` FK on both
+// testExecutions and testSetItems, requiring one specific parameter before a run could
+// start. Removed in favor of "test run parameters" - ordinary tenant-defined custom
+// fields under `entityType = 'test_run'` (see custom_field_values below), of which
+// Environment is now just one (seeded by default, same as Test Type on test cases - see
+// packages/core/src/custom-fields.ts's seedDefaultCustomFields). A tenant that doesn't
+// care about environment can delete that field entirely instead of being stuck with a
+// column the app forces on every run; a tenant that wants three run parameters isn't
+// arbitrarily limited to the one the schema used to hardcode. Existing environment data
+// was migrated into this same custom-fields system by
+// migrations-manual/022_remove_test_environments.sql, not lost.
 //
 // Rich text fields (test_steps.description/expected_result/purpose,
 // test_step_executions.actual_result) store sanitized HTML - see
 // packages/core/src/rich-text.ts for the sanitizer every write path must run through.
 // HTML was chosen partly because it's the natural bridge to Spira's own HTML-based
 // rich-text fields when the Spira importer (backlog item 8) is actually built.
-
-export const testEnvironments = pgTable("test_environments", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tenantId: uuid("tenant_id")
-    .notNull()
-    .references(() => tenants.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  sortOrder: integer("sort_order").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
 
 export const testCases = pgTable("test_cases", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -443,9 +445,6 @@ export const testExecutions = pgTable("test_executions", {
   testCaseId: uuid("test_case_id")
     .notNull()
     .references(() => testCases.id, { onDelete: "cascade" }),
-  environmentId: uuid("environment_id")
-    .notNull()
-    .references(() => testEnvironments.id),
   // Set when this run was started from a test set's row (packages/core's
   // addTestSetItem/startExecution), null for a run started from the test case's own page.
   // `onDelete: "set null"`, not cascade - removing the placement (or the whole set) must
@@ -522,10 +521,9 @@ export const testSets = pgTable("test_sets", {
 // One row per (test set, test case) *placement*, not a link table keyed by the pair -
 // `id` is its own primary key because the same test case can be added to a set more than
 // once (e.g. once per environment: "run TC-12 on a VM" and "run TC-12 on real hardware"
-// are two separate rows). `environmentId` is nullable - tagging an entry with an
-// environment is optional, not mandatory. Further custom parameters (anything beyond
-// environment) live in `custom_field_values` under `entityType = 'test_run'`, keyed by
-// this row's own id - no new table needed for those (see that table's schema comment).
+// are two separate rows). Run parameters (Environment and anything else a tenant has
+// defined) live in `custom_field_values` under `entityType = 'test_run'`, keyed by this
+// row's own id - no dedicated column needed for those (see that table's schema comment).
 export const testSetItems = pgTable("test_set_items", {
   id: uuid("id").defaultRandom().primaryKey(),
   tenantId: uuid("tenant_id")
@@ -537,7 +535,6 @@ export const testSetItems = pgTable("test_set_items", {
   testCaseId: uuid("test_case_id")
     .notNull()
     .references(() => testCases.id, { onDelete: "cascade" }),
-  environmentId: uuid("environment_id").references(() => testEnvironments.id),
   sortOrder: integer("sort_order").notNull().default(0),
   createdBy: text("created_by")
     .notNull()
@@ -676,11 +673,11 @@ export const externalLinks = pgTable(
 );
 
 // --- tenant-defined custom fields (backlog item 9.19) --------------------------------
-// A tenant-owned, ordered list of extra fields a team can add to requirements or test
-// cases beyond the fixed built-in ones - same "tenant-owned ordered list" shape as
-// `levels`, `requirement_statuses`, and `test_environments` elsewhere in this schema, not
-// a new pattern. Three tables: the field definitions themselves, each list-type field's
-// allowed options, and the actual per-entity values.
+// A tenant-owned, ordered list of extra fields a team can add to requirements, test
+// cases, or test runs beyond the fixed built-in ones - same "tenant-owned ordered list"
+// shape as `levels`/`requirement_statuses` elsewhere in this schema, not a new pattern.
+// Three tables: the field definitions themselves, each list-type field's allowed
+// options, and the actual per-entity values.
 //
 // Deliberately NOT versioned, and not part of `requirement_versions`: unlike title/
 // description/background (which get a new version, a status, and can require e-signature

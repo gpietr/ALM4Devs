@@ -12,10 +12,12 @@ import { ChevronDown, ChevronUp, Plus } from "lucide-react";
 import { useState } from "react";
 
 /**
- * Manage tenant-defined custom fields for requirements and test cases (backlog item
- * 9.19) - its own screen, same "multi-level navigation" reasoning as /settings/import's
- * hub + sub-screens: this is real, self-contained configuration work, not a couple of
- * toggles that belongs inline on the main settings page.
+ * Manage tenant-defined custom fields for requirements, test cases, and test runs
+ * (backlog item 9.19) - its own screen, same "multi-level navigation" reasoning as
+ * /settings/import's hub + sub-screens: this is real, self-contained configuration work,
+ * not a couple of toggles that belongs inline on the main settings page. Test run fields
+ * replaced the old dedicated Environment table/picker - Environment is just the default
+ * one here now, not a separate concept (see this page's own "Test run fields" section).
  */
 export default function CustomFieldsSettingsPage() {
   return (
@@ -24,12 +26,13 @@ export default function CustomFieldsSettingsPage() {
         title="Custom fields"
         description={
           <>
-            Extra fields your team wants on every requirement or test case, beyond the built-in
-            ones. Shown on the create/edit forms in the order set here, and as columns you can
-            show or hide on the requirement/test case lists and the traceability matrix — each
-            of those has a column picker covering every column, not just these. Values aren&apos;t
-            versioned the way title/description are — editing one doesn&apos;t create a new
-            version or need approval.
+            Extra fields your team wants on every requirement, test case, or test run,
+            beyond the built-in ones. Shown on the create/edit forms in the order set
+            here, and as columns you can show or hide on the requirement/test case lists
+            and the traceability matrix — each of those has a column picker covering
+            every column, not just these. Values aren&apos;t versioned the way title/
+            description are — editing one doesn&apos;t create a new version or need
+            approval.
           </>
         }
       />
@@ -42,8 +45,10 @@ export default function CustomFieldsSettingsPage() {
 
       <h3 className="mt-10 text-base font-semibold tracking-tight">Test run fields</h3>
       <p className="mt-1 text-sm text-muted-foreground">
-        Custom parameters for a test set entry, beyond the built-in environment - e.g. Browser,
-        Build config.
+        Parameters asked for whenever a run starts - directly from a test case, or from a
+        test set entry (set once there, reused for every run of that entry). Environment
+        is just the default one; delete it, rename it, or add your own (Browser, Build
+        config, …).
       </p>
       <CustomFieldsSection entityType="test_run" />
     </div>

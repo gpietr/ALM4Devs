@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import {
   seedDefaultArchitectureLevels,
   seedDefaultCustomFields,
-  seedDefaultEnvironments,
   seedDefaultLevels,
   seedDefaultStatuses,
   seedDefaultTenantSettings,
@@ -48,7 +47,6 @@ export async function POST(req: Request) {
     await seedDefaultTenantSettings(tx, tenant.id);
     await seedDefaultTestLevels(tx, tenant.id);
     await seedDefaultArchitectureLevels(tx, tenant.id);
-    await seedDefaultEnvironments(tx, tenant.id);
     await seedDefaultCustomFields(tx, tenant.id);
   });
 

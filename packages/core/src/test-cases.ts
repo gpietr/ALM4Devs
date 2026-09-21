@@ -732,7 +732,6 @@ export async function startExecution(
   params: {
     tenantId: string;
     testCaseId: string;
-    environmentId: string;
     executedBy: string;
     /** Set when this run is started from a test set's row (test-sets.ts's page), so the
      * execution can be traced back to that specific placement - see test_executions'
@@ -743,6 +742,13 @@ export async function startExecution(
      * (test-sets.ts's createTestSetRound) - lets a round's progress show only its own
      * runs. Only meaningful alongside testSetItemId; validated against it below. */
     testSetRoundId?: string;
+    /** Test run parameters (Environment and anything else a tenant has defined under
+     * Settings → Custom Fields → Test run) - validated (including required-ness) and
+     * written in the same transaction as the execution, same as createTestCase's own
+     * customFieldValues param. When starting from a test set item, the caller passes
+     * that item's already-set values along rather than this re-collecting them - see
+     * apps/web's test-sets/[id]/page.tsx. */
+    customFieldValues?: CustomFieldValueInput[];
   },
 ) {
   const steps = await db
@@ -775,13 +781,14 @@ export async function startExecution(
     .values({
       tenantId: params.tenantId,
       testCaseId: params.testCaseId,
-      environmentId: params.environmentId,
       executedBy: params.executedBy,
       testSetItemId: params.testSetItemId ?? null,
       testSetRoundId: params.testSetRoundId ?? null,
     })
     .returning();
   if (!execution) throw new DomainError("failed to start execution");
+
+  await setCustomFieldValues(db, params.tenantId, "test_run", execution.id, params.customFieldValues ?? []);
 
   const stepExecutions: (typeof schema.testStepExecutions.$inferSelect)[] = [];
   for (const step of steps) {

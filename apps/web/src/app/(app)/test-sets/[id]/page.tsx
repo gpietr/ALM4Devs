@@ -38,7 +38,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 
-const NO_ENVIRONMENT = "__none__";
 const STATUS_ORDER = ["not_run", "in_progress", "pass", "fail", "blocked", "abandoned"] as const;
 
 interface TestCaseOption {
@@ -64,8 +63,6 @@ interface TestSetItem {
   testCaseTitle: string;
   testCaseSequenceNumber: number;
   testCaseLevelCode: string;
-  environmentId: string | null;
-  environmentName: string | null;
   customFieldValues: CustomFieldValueView[];
   lastExecution: LastExecution | null;
 }
@@ -94,7 +91,6 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
   const productId = detail.data?.set.productId ?? "";
 
   const testCaseOptions = trpc.testCases.listAllByProduct.useQuery({ productId }, { enabled: !!detail.data });
-  const environments = trpc.testCases.listEnvironments.useQuery();
   const customFieldsQuery = trpc.settings.listCustomFields.useQuery({ entityType: "test_run" });
   const customFieldDefs = asCustomFieldDefinitions(customFieldsQuery.data ?? []);
 
@@ -123,9 +119,9 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
     },
   });
 
-  // Structural item edits (add/remove/reorder/environment/parameters) are visible from
-  // both the all-time view and whichever round is currently selected - invalidate both so
-  // neither goes stale depending on which one happens to be on screen.
+  // Structural item edits (add/remove/reorder/parameters) are visible from both the
+  // all-time view and whichever round is currently selected - invalidate both so neither
+  // goes stale depending on which one happens to be on screen.
   const invalidate = () => {
     utils.testSets.get.invalidate({ id });
     if (usingRound) utils.testSets.getRound.invalidate({ id: selectedRoundId });
@@ -149,7 +145,6 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
   }, [detail.data]);
 
   const [newTestCaseId, setNewTestCaseId] = useState<string | null>(null);
-  const [newEnvironmentId, setNewEnvironmentId] = useState<string>(NO_ENVIRONMENT);
   const [newCustomFieldState, setNewCustomFieldState] = useState<CustomFieldFormState>({});
 
   const testCaseItems = useMemo(
@@ -288,8 +283,7 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
                   <TableRow>
                     <TableHead className="w-[36px]" />
                     <TableHead>Test case</TableHead>
-                    <TableHead className="w-[150px]">Environment</TableHead>
-                    {customFieldDefs.length > 0 && <TableHead className="w-[160px]">Parameters</TableHead>}
+                    {customFieldDefs.length > 0 && <TableHead className="w-[180px]">Parameters</TableHead>}
                     <TableHead className="w-[190px]">Last run</TableHead>
                     <TableHead className="w-[220px]" />
                   </TableRow>
@@ -303,7 +297,6 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
                       itemCount={items.length}
                       testSetId={id}
                       testSetRoundId={usingRound ? selectedRoundId : undefined}
-                      environments={environments.data ?? []}
                       customFieldDefs={customFieldDefs}
                       updateItem={updateItem}
                       removeItem={removeItem}
@@ -325,13 +318,11 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
               {
                 testSetId: id,
                 testCaseId: newTestCaseId,
-                environmentId: newEnvironmentId === NO_ENVIRONMENT ? undefined : newEnvironmentId,
                 customFieldValues: toCustomFieldValuesInput(newCustomFieldState),
               },
               {
                 onSuccess: () => {
                   setNewTestCaseId(null);
-                  setNewEnvironmentId(NO_ENVIRONMENT);
                   setNewCustomFieldState(emptyCustomFieldFormState(customFieldDefs));
                 },
               },
@@ -367,23 +358,6 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
                 </ComboboxPositioner>
               </ComboboxPortal>
             </Combobox>
-          </Label>
-
-          <Label className="flex-col items-start gap-1">
-            <span className="text-xs font-medium text-muted-foreground">Environment</span>
-            <Select value={newEnvironmentId} onValueChange={(v) => setNewEnvironmentId(v ?? NO_ENVIRONMENT)}>
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_ENVIRONMENT}>— none —</SelectItem>
-                {environments.data?.map((env) => (
-                  <SelectItem key={env.id} value={env.id}>
-                    {env.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </Label>
 
           <CustomFieldInputs
@@ -435,7 +409,6 @@ function RunOverview({ items }: { items: TestSetItem[] }) {
               <li key={item.id} className="flex items-center justify-between gap-2 text-[13px]">
                 <span className="min-w-0 truncate">
                   {formatItemId(item.testCaseLevelCode, item.testCaseSequenceNumber)}: {item.testCaseTitle}
-                  {item.environmentName ? ` · ${item.environmentName}` : ""}
                   <span className="text-muted-foreground"> — {item.lastExecution!.executedByName}, started {new Date(item.lastExecution!.startedAt).toLocaleString()}</span>
                 </span>
                 <Link
@@ -459,7 +432,6 @@ function TestSetItemRow({
   itemCount,
   testSetId,
   testSetRoundId,
-  environments,
   customFieldDefs,
   updateItem,
   removeItem,
@@ -472,7 +444,6 @@ function TestSetItemRow({
   /** The currently selected round, if any - tags the execution so its progress shows up
    * under that round instead of (or in addition to) the set's all-time history. */
   testSetRoundId?: string;
-  environments: { id: string; name: string }[];
   customFieldDefs: ReturnType<typeof asCustomFieldDefinitions>;
   updateItem: ReturnType<typeof trpc.testSets.updateItem.useMutation>;
   removeItem: ReturnType<typeof trpc.testSets.removeItem.useMutation>;
@@ -487,6 +458,11 @@ function TestSetItemRow({
       .filter((v) => v.value != null)
       .map((v) => `${v.name}: ${formatCustomFieldValue(v)}`)
       .join(", ") || "—";
+  // Same required-field gate startExecution's own setCustomFieldValues enforces server
+  // side - checked here too so "Run" can just be disabled instead of round-tripping an
+  // error. getCustomFieldValuesForEntities always returns one row per defined field
+  // (value: null if unset), so this doesn't need customFieldDefs at all.
+  const canRun = item.customFieldValues.every((v) => !v.isRequired || v.value != null);
 
   return (
     <TableRow>
@@ -519,25 +495,6 @@ function TestSetItemRow({
         <Link href={`/test-cases/${item.testCaseId}`} className="text-[13.5px] font-medium hover:underline">
           {formatItemId(item.testCaseLevelCode, item.testCaseSequenceNumber)}: {item.testCaseTitle}
         </Link>
-      </TableCell>
-
-      <TableCell className="align-top">
-        <Select
-          value={item.environmentId ?? NO_ENVIRONMENT}
-          onValueChange={(v) => updateItem.mutate({ itemId: item.id, environmentId: v === NO_ENVIRONMENT ? null : v })}
-        >
-          <SelectTrigger className="h-8 w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NO_ENVIRONMENT}>— none —</SelectItem>
-            {environments.map((env) => (
-              <SelectItem key={env.id} value={env.id}>
-                {env.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </TableCell>
 
       {customFieldDefs.length > 0 && (
@@ -588,16 +545,18 @@ function TestSetItemRow({
               type="button"
               size="sm"
               variant="outline"
-              disabled={!item.environmentId || startExecution.isPending}
-              title={item.environmentId ? undefined : "Assign an environment to run this test"}
+              disabled={!canRun || startExecution.isPending}
+              title={canRun ? undefined : "Fill in this item's required run parameters first"}
               onClick={() => {
-                if (!item.environmentId) return;
+                if (!canRun) return;
                 startExecution.mutate(
                   {
                     testCaseId: item.testCaseId,
-                    environmentId: item.environmentId,
                     testSetItemId: item.id,
                     testSetRoundId,
+                    // Carries the item's own already-set parameters onto the execution -
+                    // see test-cases.ts's startExecution and test-sets.ts's docstring.
+                    customFieldValues: item.customFieldValues.map((v) => ({ fieldId: v.fieldId, value: v.value })),
                   },
                   { onSuccess: (result) => router.push(`/test-cases/${item.testCaseId}/executions/${result.execution.id}`) },
                 );
@@ -622,9 +581,10 @@ function TestSetItemRow({
   );
 }
 
-/** Inline editor for one item's test_run custom field values - seeded from the item's
- * current values, saved on demand rather than on every keystroke (mirrors the
- * environment select's own "save immediately" feel would be too noisy for text fields). */
+/** Inline editor for one item's test_run custom field values (Environment and anything
+ * else a tenant has defined) - seeded from the item's current values, saved on demand
+ * rather than on every keystroke, since a "save immediately" feel would be too noisy for
+ * text fields. */
 function ItemCustomFieldsEditor({
   fields,
   values,
