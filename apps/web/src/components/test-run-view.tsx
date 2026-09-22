@@ -62,11 +62,21 @@ export function TestRunView({
     onSuccess: () => utils.testCases.getExecution.invalidate({ id: executionId }),
   });
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
+  const firstNotRun = stepExecutions.find((se) => se.status === "not_run");
+  // Pins the initial step once data arrives, then leaves activeStepId alone. Without this,
+  // "find by id ?? firstNotRun" re-derives firstNotRun on every render - so recording *any*
+  // step's result (even via "Save & stay", or a fail that intentionally shouldn't advance)
+  // changes that step's status, which silently retargets the view at whatever's now the
+  // next not-run step. Once pinned, only an explicit setActiveStepId (roster click, or the
+  // deliberate advance/complete calls below) moves the view.
+  useEffect(() => {
+    const initialStepId = firstNotRun?.id ?? stepExecutions[0]?.id;
+    if (activeStepId === null && initialStepId) setActiveStepId(initialStepId);
+  }, [activeStepId, stepExecutions, firstNotRun]);
 
   if (query.isLoading) return <p className="p-10 text-[13.5px] text-muted-foreground">Loading…</p>;
   if (query.error || !execution) return <p className="p-10 text-sm text-destructive">{query.error?.message}</p>;
 
-  const firstNotRun = stepExecutions.find((se) => se.status === "not_run");
   const activeStep = stepExecutions.find((se) => se.id === activeStepId) ?? firstNotRun ?? stepExecutions[0];
   const activeIndex = activeStep ? stepExecutions.findIndex((se) => se.id === activeStep.id) : -1;
   const nextStep = activeIndex >= 0 ? (stepExecutions[activeIndex + 1] ?? null) : null;
@@ -200,6 +210,9 @@ export function TestRunView({
               totalSteps={stepExecutions.length}
               verifies={stepRequirementLinks.get(activeStep.testStepId) ?? []}
               onAdvance={() => nextStep && setActiveStepId(nextStep.id)}
+              isLastStep={nextStep === null}
+              onComplete={() => completeExecution.mutate({ executionId })}
+              completing={completeExecution.isPending}
             />
           )}
         </div>
@@ -222,6 +235,9 @@ function StepRecorder({
   totalSteps,
   verifies,
   onAdvance,
+  isLastStep,
+  onComplete,
+  completing,
 }: {
   stepExecution: StepExecution;
   executionId: string;
@@ -229,6 +245,11 @@ function StepRecorder({
   totalSteps: number;
   verifies: RunRequirementLink[];
   onAdvance: () => void;
+  /** Whether this is the last step in the roster - there's nothing to advance to, so the
+   * primary button's job changes from "save & move on" to "save & finish the run". */
+  isLastStep: boolean;
+  onComplete: () => void;
+  completing: boolean;
 }) {
   const utils = trpc.useUtils();
   const recordResult = trpc.testCases.recordStepResult.useMutation({
@@ -247,12 +268,27 @@ function StepRecorder({
   // happened, same rule the backend enforces (recordStepResult's own refine).
   const canSave = status !== null && (status === "pass" || actualResult.trim().length > 0);
 
-  function save(nextStatus: "pass" | "fail" | "blocked" | null, advance: boolean) {
+  // `wantsToMoveOn` is the user's intent (true from the quick-status pills, the primary
+  // button and ⌘↵, false from "Save & stay"). `viaPill` distinguishes the two places that
+  // pass true: the quick-status pills are a fast "mark it" gesture, so fail/blocked never
+  // move on from there - a note might already happen to be typed, and completing the run
+  // is too big a consequence for an incidental click. The primary button/⌘↵ only enable
+  // once a note exists (canSave), so reaching them is always a deliberate "I'm done with
+  // this step" - there, fail/blocked move on just like pass. The last step has nothing to
+  // advance to anyway, so "moving on" from it means finishing the run instead.
+  function save(nextStatus: "pass" | "fail" | "blocked" | null, wantsToMoveOn: boolean, viaPill: boolean) {
     if (nextStatus === null || recordResult.isPending) return;
     if (nextStatus !== "pass" && !actualResult.trim()) return;
     recordResult.mutate(
       { testStepExecutionId: stepExecution.id, actualResult, status: nextStatus },
-      { onSuccess: advance ? onAdvance : undefined },
+      {
+        onSuccess: () => {
+          if (!wantsToMoveOn) return;
+          if (viaPill && nextStatus !== "pass") return;
+          if (isLastStep) onComplete();
+          else onAdvance();
+        },
+      },
     );
   }
 
@@ -262,7 +298,7 @@ function StepRecorder({
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
-        save(status, true);
+        save(status, true, false);
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -329,15 +365,17 @@ function StepRecorder({
             type="button"
             onClick={() => {
               setStatus(s);
-              save(s, true);
+              save(s, true, true);
             }}
-            disabled={recordResult.isPending}
+            disabled={recordResult.isPending || completing}
             className={cn(
               "flex-1 border py-2.5 text-center font-mono text-[13px] font-medium uppercase disabled:opacity-60",
               status === s ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground",
             )}
           >
-            {s}
+            {/* Only "pass" ever moves you on from here (fail/blocked always stay on this
+                step, whatever step it is), so it's the only one worth spelling out. */}
+            {s === "pass" ? (isLastStep ? "Pass & complete" : "Pass & next step") : s}
           </button>
         ))}
       </div>
@@ -374,15 +412,25 @@ function StepRecorder({
       </div>
 
       <div className="flex gap-2.5">
-        <Button className="flex-1" disabled={recordResult.isPending || !canSave} onClick={() => save(status, true)}>
-          {recordResult.isPending ? "Saving…" : "Save & next step"}
+        <Button
+          className="flex-1"
+          disabled={recordResult.isPending || completing || !canSave}
+          onClick={() => save(status, true, false)}
+        >
+          {recordResult.isPending || completing
+            ? isLastStep
+              ? "Completing…"
+              : "Saving…"
+            : isLastStep
+              ? "Complete run"
+              : "Save & next step"}
           <span className="ml-1.5 border border-primary-foreground/45 px-1 font-mono text-[10px] font-normal normal-case">⌘↵</span>
         </Button>
         <Button
           variant="outline"
           className="flex-1"
-          disabled={recordResult.isPending || !canSave}
-          onClick={() => save(status, false)}
+          disabled={recordResult.isPending || completing || !canSave}
+          onClick={() => save(status, false, false)}
         >
           {recordResult.isPending ? "Saving…" : "Save & stay"}
         </Button>

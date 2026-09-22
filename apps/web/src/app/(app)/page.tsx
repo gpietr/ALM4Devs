@@ -1,8 +1,6 @@
 import { auth } from "@/lib/auth";
 import { TopBar } from "@/components/context-strip";
 import { LastLocationRedirect } from "@/components/last-location-redirect";
-import { buttonVariants } from "@/components/ui/button";
-import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -11,8 +9,9 @@ import { redirect } from "next/navigation";
 // page) so we redirect instead of throwing on `.user`.
 //
 // LastLocationRedirect (a client component) sends a returning user straight back to the
-// product/artifact/level they were last looking at, if any is remembered - this page's own
-// content below only ever shows on a first visit, or if nothing's remembered.
+// product/artifact/level they were last looking at, if any is remembered, or - if nothing
+// is remembered - auto-continues to the tenant's one product / tells them to pick one.
+// This page's own "Signed in as" content below is the static shell around that.
 export default async function HomePage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/log-in");
@@ -20,18 +19,13 @@ export default async function HomePage() {
 
   return (
     <>
-      <LastLocationRedirect />
       <TopBar />
       <main className="mx-auto max-w-2xl px-4 py-10">
         <h1 className="font-heading text-[28px] leading-tight tracking-tight">ALM4Devs</h1>
         <p className="mt-1 text-sm text-muted-foreground">Signed in as {user.email}</p>
         <p className="text-sm text-muted-foreground">Organization id: {user.tenantId}</p>
 
-        <div className="mt-10">
-          <Link href="/products" className={buttonVariants({ size: "lg" })}>
-            Go to Products →
-          </Link>
-        </div>
+        <LastLocationRedirect />
       </main>
     </>
   );
