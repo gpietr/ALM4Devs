@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@galm/db": "workspace:*",
+    "@galm/email": "workspace:*",
     "@galm/jobs": "workspace:*"
   }
 }

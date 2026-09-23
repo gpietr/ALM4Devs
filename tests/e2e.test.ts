@@ -18,9 +18,33 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const PG_SUPERUSER_URL =
   process.env.E2E_PG_SUPERUSER_URL ?? "postgres://postgres:postgres_superuser_dev_password@localhost:5432/galm";
 const PG_APP_URL = process.env.DATABASE_URL ?? "postgres://app_runtime:app_runtime_dev_password@localhost:5432/galm";
+const MAILPIT_URL = process.env.E2E_MAILPIT_URL ?? "http://localhost:8025";
 
 function uniqueSuffix(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Polls Mailpit (docker-compose.yml's local SMTP catcher) for the verification email sent
+ * to `email`, since it's delivered asynchronously via the send-verification-email job -
+ * see apps/worker/src/index.ts. Returns the verify-email link from the email body. */
+async function getVerificationLink(email: string): Promise<string> {
+  // pg-boss (packages/jobs) polls for new jobs every 2s by default, so give the
+  // send-verification-email job + SMTP delivery to Mailpit a generous window.
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const searchRes = await fetch(`${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`);
+    if (searchRes.ok) {
+      const search = (await searchRes.json()) as { messages: { ID: string }[] };
+      const latest = search.messages[0];
+      if (latest) {
+        const msgRes = await fetch(`${MAILPIT_URL}/api/v1/message/${latest.ID}`);
+        const msg = (await msgRes.json()) as { Text: string };
+        const match = msg.Text.match(/https?:\/\/\S+verify-email\S+/);
+        if (match) return match[0];
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`No verification email found for ${email} in Mailpit within timeout`);
 }
 
 function parseCookie(res: Response): string {
@@ -4271,4 +4295,53 @@ describe("e2e: test sets", () => {
     const detail = await rpc(tenant.cookie, "GET", "testSets.get", { id: set.data.id });
     expect(detail.data.items[0].lastExecution).toMatchObject({ id: started.data.execution.id, status: "in_progress" });
   });
+});
+
+describe("e2e: email verification on registration", () => {
+  test("registering starts a user unverified and still sends a verification email (REQUIRE_EMAIL_VERIFICATION=false default)", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const [row] = await sql`select email_verified from "user" where id = ${tenant.userId}`;
+    await sql.close();
+    expect(row.email_verified).toBe(false);
+
+    // Soft gate: registration already returned an authenticated session despite being
+    // unverified - a protected call succeeds immediately.
+    const me = await rpc(tenant.cookie, "GET", "settings.get");
+    expect(me.ok).toBe(true);
+
+    await getVerificationLink(tenant.email);
+  }, 20000);
+
+  test("clicking the emailed verification link marks the user verified", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const link = await getVerificationLink(tenant.email);
+
+    const res = await fetch(link, { redirect: "manual" });
+    expect([200, 302]).toContain(res.status);
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const [row] = await sql`select email_verified from "user" where id = ${tenant.userId}`;
+    await sql.close();
+    expect(row.email_verified).toBe(true);
+  }, 20000);
+
+  test("POST /api/auth/send-verification-email resends the link", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await getVerificationLink(tenant.email); // drain the sign-up email first
+
+    const res = await fetch(`${BASE_URL}/api/auth/send-verification-email`, {
+      method: "POST",
+      // better-auth's CSRF check requires a same-origin Origin header on any request that
+      // carries a session cookie (a real browser's fetch sends this automatically; a bare
+      // curl/fetch from a test script has to set it explicitly).
+      headers: { "Content-Type": "application/json", Cookie: tenant.cookie, Origin: BASE_URL },
+      body: JSON.stringify({ email: tenant.email, callbackURL: "/" }),
+    });
+    expect(res.ok).toBe(true);
+
+    const link = await getVerificationLink(tenant.email);
+    expect(link).toContain("verify-email");
+  }, 20000);
 });

@@ -1,0 +1,14 @@
+{
+  "name": "@galm/email",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "nodemailer": "^6.9.16"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.17"
+  }
+}

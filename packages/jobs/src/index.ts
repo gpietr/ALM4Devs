@@ -38,10 +38,13 @@ export async function registerWorker<T extends object>(
 ): Promise<void> {
   const boss = await getBoss();
   await boss.createQueue(queue).catch(() => {});
-  await boss.work<T>(queue, async (jobs) => {
-    for (const job of jobs) {
-      await handler(job.data);
-    }
+  // batchSize/pollingIntervalSeconds default to 1 job per 2s poll (pg-boss's own
+  // defaults) - fine for a single slow job, but a burst (e.g. many registrations in a
+  // short window) would queue up behind that one-at-a-time rate. Fetch a real batch every
+  // 500ms and run it concurrently instead - each of this app's jobs (send an email, insert
+  // a row) is independent I/O with nothing to serialize on.
+  await boss.work<T>(queue, { batchSize: 25, pollingIntervalSeconds: 0.5 }, async (jobs) => {
+    await Promise.all(jobs.map((job) => handler(job.data)));
   });
 }
 

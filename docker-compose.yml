@@ -60,13 +60,27 @@ services:
       dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
     env_file: .env
+    # Same reasoning as DATABASE_URL above: .env's SMTP_HOST=localhost is for host-side
+    # scripts; the worker (the only service that actually sends mail, via @galm/email) needs
+    # the compose service name instead.
     environment:
       DATABASE_URL: postgres://app_runtime:app_runtime_dev_password@postgres:5432/galm
+      SMTP_HOST: mailpit
     volumes:
       - evidence:/data/evidence
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Local-dev/e2e-only SMTP catcher: emails sent to it are captured, never actually
+  # delivered, and viewable at http://localhost:8025. Not used in production - real
+  # deployments point SMTP_HOST at a real mail relay instead.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 
 volumes:
   pgdata:

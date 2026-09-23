@@ -1,4 +1,5 @@
 import { createAppDb, schema } from "@galm/db";
+import { sendEmail, verificationEmailTemplate } from "@galm/email";
 import { registerWorker } from "@galm/jobs";
 
 const db = createAppDb();
@@ -10,6 +11,14 @@ async function main() {
     console.log("[worker] processing ping job:", data.message);
     await db.insert(schema.jobPings).values({ message: data.message });
   });
+
+  await registerWorker<{ to: string; name: string; url: string }>(
+    "send-verification-email",
+    async (data) => {
+      const { subject, html, text } = verificationEmailTemplate({ name: data.name, url: data.url });
+      await sendEmail({ to: data.to, subject, html, text });
+    },
+  );
 
   console.log("[worker] ready, waiting for jobs.");
 }

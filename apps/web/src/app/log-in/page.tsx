@@ -1,5 +1,6 @@
 "use client";
 
+import { ResendVerificationButton } from "@/components/resend-verification-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,15 +13,23 @@ export default function LogInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [needsVerification, setNeedsVerification] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNeedsVerification(false);
     setSubmitting(true);
     const { error: signInError } = await authClient.signIn.email({ email, password });
     setSubmitting(false);
     if (signInError) {
+      // Only reachable when REQUIRE_EMAIL_VERIFICATION=true (apps/web/src/lib/auth.ts) -
+      // better-auth blocks sign-in for an unverified account with this specific code.
+      if (signInError.code === "EMAIL_NOT_VERIFIED") {
+        setNeedsVerification(true);
+        return;
+      }
       setError(signInError.message ?? "Log in failed");
       return;
     }
@@ -48,6 +57,14 @@ export default function LogInPage() {
           </Label>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
+          {needsVerification && (
+            <div className="space-y-2 rounded-md border border-border p-3">
+              <p className="text-sm text-foreground">
+                Your email isn&apos;t verified yet. Check your inbox for the verification link.
+              </p>
+              <ResendVerificationButton email={email} />
+            </div>
+          )}
 
           <Button type="submit" disabled={submitting} className="w-full">
             {submitting ? "Logging in..." : "Log in"}

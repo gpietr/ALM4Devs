@@ -1,5 +1,6 @@
 "use client";
 
+import { ResendVerificationButton } from "@/components/resend-verification-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,6 +35,15 @@ export default function RegisterPage() {
           typeof body.error === "string" ? body.error : body.error?.message;
         throw new Error(message ?? "Registration failed");
       }
+      // REQUIRE_EMAIL_VERIFICATION=true withholds the session (`token: null` in the
+      // response body) until the emailed link is clicked - show a "check your email" state
+      // instead of the dashboard in that case. Off (the default), `token` is set and this
+      // behaves exactly as it always has.
+      const body = (await res.json().catch(() => ({}))) as { token?: string | null };
+      if (!body.token) {
+        setPendingVerificationEmail(email);
+        return;
+      }
       router.push("/");
       router.refresh();
     } catch (err) {
@@ -40,6 +51,22 @@ export default function RegisterPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (pendingVerificationEmail) {
+    return (
+      <main className="flex min-h-screen items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-4 text-center">
+          <p className="font-heading text-[18px] tracking-[0.08em] text-foreground">ALM4Devs</p>
+          <h1 className="text-xl font-semibold tracking-tight">Check your email</h1>
+          <p className="text-sm text-muted-foreground">
+            We sent a verification link to <span className="font-medium text-foreground">{pendingVerificationEmail}</span>.
+            Click it to finish setting up your account.
+          </p>
+          <ResendVerificationButton email={pendingVerificationEmail} />
+        </div>
+      </main>
+    );
   }
 
   return (

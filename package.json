@@ -9,12 +9,13 @@
     "scripts"
   ],
   "scripts": {
-    "typecheck": "for d in packages/db packages/storage packages/jobs packages/documents packages/core packages/integrations/spira packages/integrations/llm packages/integrations/nvd apps/web apps/worker scripts tests; do echo \"--- $d ---\"; (cd $d && bunx tsc --noEmit -p tsconfig.json) || exit 1; done",
+    "typecheck": "for d in packages/db packages/storage packages/jobs packages/email packages/documents packages/core packages/integrations/spira packages/integrations/llm packages/integrations/nvd apps/web apps/worker scripts tests; do echo \"--- $d ---\"; (cd $d && bunx tsc --noEmit -p tsconfig.json) || exit 1; done",
     "test:e2e": "bun test tests/e2e.test.ts",
     "db:generate": "cd packages/db && bunx drizzle-kit generate",
     "db:migrate": "bun run --filter=@galm/db migrate",
     "db:seed": "bun run scripts/seed.ts",
     "db:backfill-tenant-defaults": "bun run scripts/backfill-tenant-defaults.ts",
+    "db:backfill-email-verified": "bun run scripts/backfill-email-verified.ts",
     "verify:audit-immutability": "bun run scripts/verify-audit-immutability.ts",
     "verify:walking-skeleton": "./scripts/verify-walking-skeleton.sh",
     "dev:web": "bun run --filter=@galm/web dev",
