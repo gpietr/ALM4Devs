@@ -28,11 +28,19 @@ export default function RegisterPage() {
         body: JSON.stringify({ orgName, name, email, password }),
       });
       if (!res.ok) {
+        if (res.status === 422) {
+          throw new Error("An account with this email already exists. Try logging in instead.");
+        }
+        if (res.status === 429) {
+          throw new Error("Too many attempts. Please wait a moment and try again.");
+        }
         const body = (await res.json().catch(() => ({}))) as {
-          error?: string | { message?: string };
+          error?: string | { message?: string; fieldErrors?: Record<string, string[]> };
         };
+        const fieldErrors = typeof body.error === "object" ? body.error?.fieldErrors : undefined;
+        const firstFieldError = fieldErrors && Object.values(fieldErrors).flat()[0];
         const message =
-          typeof body.error === "string" ? body.error : body.error?.message;
+          typeof body.error === "string" ? body.error : (body.error?.message ?? firstFieldError);
         throw new Error(message ?? "Registration failed");
       }
       // REQUIRE_EMAIL_VERIFICATION=true withholds the session (`token: null` in the

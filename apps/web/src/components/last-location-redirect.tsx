@@ -37,19 +37,18 @@ export function LastLocationRedirect() {
   useEffect(() => {
     const onlyProduct = products.data?.length === 1 ? products.data[0] : undefined;
     if (onlyProduct) router.replace(`/products/${onlyProduct.id}`);
+    // Nothing to look at yet - go straight to the create-product form rather than
+    // leaving the user on a home page with empty lists.
+    if (products.data?.length === 0) router.replace("/products");
   }, [products.data, router]);
 
   // Still checking localStorage, redirecting to a remembered location, or about to
   // redirect to the tenant's one product - nothing to show for any of those.
-  if (hasLastLocation !== false || products.isLoading || products.data?.length === 1) return null;
+  if (hasLastLocation !== false || products.isLoading || products.data?.length === 1 || products.data?.length === 0) return null;
 
   return (
     <div className="mt-10">
-      <p className="mb-3 text-sm text-muted-foreground">
-        {products.data?.length === 0
-          ? "You don't have any products yet — create one to get started."
-          : "Select a product to get started."}
-      </p>
+      <p className="mb-3 text-sm text-muted-foreground">Select a product to get started.</p>
       <Link href="/products" className={buttonVariants({ size: "lg" })}>
         Go to Products →
       </Link>
