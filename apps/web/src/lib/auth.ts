@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { ruleFromEnv } from "@/server/rate-limit";
 import { schema } from "@galm/db";
 import { enqueue } from "@galm/jobs";
 import { APIError, betterAuth } from "better-auth";
@@ -113,6 +114,14 @@ export const auth = betterAuth({
           return { data };
         },
       },
+    },
+  },
+  // Keyed off a header /api/auth/[...all]/route.ts overwrites with the trusted-proxy-
+  // resolved client IP, never the raw (spoofable) X-Forwarded-For.
+  advanced: { ipAddress: { ipAddressHeaders: ["x-galm-client-ip"] } },
+  rateLimit: {
+    customRules: {
+      "/sign-in/email": ruleFromEnv("LOGIN", { window: 10, max: 3 }),
     },
   },
   secret: process.env.BETTER_AUTH_SECRET,

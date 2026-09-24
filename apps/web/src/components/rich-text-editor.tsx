@@ -1,5 +1,6 @@
 "use client";
 
+import { uploadErrorMessage } from "@/lib/upload-error";
 import { MinimalTiptapEditor } from "@/components/ui/minimal-tiptap";
 
 /**
@@ -41,7 +42,7 @@ export function RichTextEditor({
       },
       body: file,
     });
-    if (!res.ok) throw new Error("Image upload failed");
+    if (!res.ok) throw new Error(await uploadErrorMessage(res));
     const body = (await res.json()) as { url: string };
     return body.url;
   }

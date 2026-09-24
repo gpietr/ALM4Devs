@@ -1,5 +1,6 @@
 import { storage } from "@/lib/storage";
 import { requireActiveUser } from "@/server/tenant-access";
+import { readBodyWithLimit } from "@/server/upload-limit";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
@@ -9,7 +10,8 @@ export async function POST(req: Request) {
   const user = await requireActiveUser(req);
   if (user instanceof Response) return user;
 
-  const bytes = new Uint8Array(await req.arrayBuffer());
+  const bytes = await readBodyWithLimit(req);
+  if (bytes instanceof Response) return bytes;
   // No "unknown-tenant" fallback any more: requireActiveUser rejects a session without a
   // tenantId outright, so this prefix is always a real tenant's.
   const key = `${user.tenantId}/${randomUUID()}`;

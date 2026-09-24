@@ -29,19 +29,30 @@ function sweep(now: number) {
 }
 
 /**
- * The client IP, or null when it can't be determined. Reads the usual proxy headers, which
- * are trivially spoofable unless something in front of the app overwrites them - so this
- * is only meaningful behind a reverse proxy/ingress that does. (better-auth has the same
- * constraint and is explicit about it: without `advanced.ipAddress.ipAddressHeaders` set,
- * it logs a warning and falls back to one shared bucket for everyone.)
+ * The client IP, or null when it can't be determined.
+ *
+ * `X-Forwarded-For` is only trustworthy for the entries our own reverse proxies appended:
+ * a client can send any value it likes, and each proxy adds the address it saw to the
+ * *right* end. So with `TRUSTED_PROXY_HOPS=N` (how many proxies sit in front of the app),
+ * the real client is the Nth entry from the right; anything further left is client-supplied
+ * and ignored. With the default of 0 no header is trusted at all and every request lands in
+ * one shared bucket - a global ceiling rather than a per-IP limit that a spoofed header
+ * sidesteps. Set it to 1 behind a single ingress/load balancer that appends to XFF.
  */
-function clientIp(req: Request): string | null {
+export function clientIp(req: Request, hops: number = trustedProxyHops()): string | null {
+  if (hops <= 0) return null;
   const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return req.headers.get("x-real-ip")?.trim() || null;
+  if (!forwarded) return null;
+  const entries = forwarded
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  return entries[entries.length - hops] ?? null;
+}
+
+export function trustedProxyHops(): number {
+  const parsed = Number(process.env.TRUSTED_PROXY_HOPS);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
 }
 
 export interface RateLimitRule {

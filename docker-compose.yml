@@ -53,6 +53,9 @@ services:
       # A real deployment should leave these unset to get the strict defaults.
       REGISTER_RATE_LIMIT_MAX: "100000"
       ACCEPT_INVITE_RATE_LIMIT_MAX: "100000"
+      # Sign-in is limited per client IP, and with no TRUSTED_PROXY_HOPS set every request
+      # shares one bucket, so the local stack raises it too.
+      LOGIN_RATE_LIMIT_MAX: "100000"
     ports:
       - "3000:3000"
     volumes:

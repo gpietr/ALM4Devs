@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { storage } from "@/lib/storage";
 import { requireActiveUser } from "@/server/tenant-access";
+import { readBodyWithLimit } from "@/server/upload-limit";
 import { registerAttachment } from "@galm/core";
 import { withTenant } from "@galm/db";
 import { randomUUID } from "node:crypto";
@@ -18,7 +19,8 @@ export async function POST(req: Request) {
   const stepExecutionId = new URL(req.url).searchParams.get("stepExecutionId") ?? undefined;
   const contentType = req.headers.get("content-type") ?? "application/octet-stream";
   const filename = req.headers.get("x-filename") ?? "upload";
-  const bytes = new Uint8Array(await req.arrayBuffer());
+  const bytes = await readBodyWithLimit(req);
+  if (bytes instanceof Response) return bytes;
 
   const storageKey = `${user.tenantId}/${randomUUID()}`;
   await storage.putObject(storageKey, bytes);

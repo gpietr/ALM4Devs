@@ -1,5 +1,7 @@
 "use client";
 
+import { uploadErrorMessage } from "@/lib/upload-error";
+import { toast } from "sonner";
 import { formatCustomFieldValue } from "@/components/custom-fields";
 import { GenerateDocumentButton } from "@/components/generate-document-button";
 import { ResultSquare } from "@/components/context-rail";
@@ -315,6 +317,10 @@ function StepRecorder({
         body: file,
       });
       if (res.ok) await utils.testCases.getExecution.invalidate({ id: executionId });
+      else toast.error(`Couldn't upload ${file.name}`, { description: await uploadErrorMessage(res) });
+    } catch {
+      // fetch itself rejected: the connection dropped, or a proxy cut off an oversized body.
+      toast.error(`Couldn't upload ${file.name}`, { description: "Upload failed - the file may be too large." });
     } finally {
       setUploading(false);
     }

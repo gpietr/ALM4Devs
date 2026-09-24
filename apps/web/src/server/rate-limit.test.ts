@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { rateLimit, ruleFromEnv } from "./rate-limit";
+import { clientIp, rateLimit, ruleFromEnv } from "./rate-limit";
 
 /** Each test uses its own bucket name so the module-level Map can't leak between them. */
+process.env.TRUSTED_PROXY_HOPS = "1";
+
 function req(ip: string): Request {
   return new Request("http://localhost/api/register", {
     method: "POST",
@@ -43,14 +45,21 @@ describe("rateLimit", () => {
     expect(rateLimit(req("5.5.5.5"), "t-window", rule)).toBeNull();
   });
 
-  test("takes the first hop of a multi-hop x-forwarded-for", () => {
+  test("trusts only the entry our proxy appended, not client-supplied ones", () => {
     const rule = { window: 60, max: 1 };
-    const chained = new Request("http://localhost/api/register", {
-      method: "POST",
-      headers: { "x-forwarded-for": "6.6.6.6, 10.0.0.1, 10.0.0.2" },
-    });
-    expect(rateLimit(chained, "t-xff", rule)).toBeNull();
-    expect(rateLimit(req("6.6.6.6"), "t-xff", rule)?.status).toBe(429);
+    const spoofed = (fake: string) =>
+      new Request("http://localhost/api/register", {
+        method: "POST",
+        headers: { "x-forwarded-for": `${fake}, 6.6.6.6` },
+      });
+    expect(rateLimit(spoofed("9.9.9.1"), "t-xff", rule)).toBeNull();
+    // A different spoofed prefix must not reset the bucket for the same real client.
+    expect(rateLimit(spoofed("9.9.9.2"), "t-xff", rule)?.status).toBe(429);
+  });
+
+  test("with no trusted proxies configured, the header is ignored entirely", () => {
+    expect(clientIp(req("1.2.3.4"), 0)).toBeNull();
+    expect(clientIp(req("1.2.3.4"), 1)).toBe("1.2.3.4");
   });
 
   test("requests with no resolvable IP share one bucket rather than going unlimited", () => {
