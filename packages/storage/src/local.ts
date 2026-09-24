@@ -10,6 +10,17 @@ export interface LocalFsStorageOptions {
   servePath: string;
 }
 
+/**
+ * What a verified token says about the object it points at. `contentType` is part of the
+ * signed payload rather than something the serving route infers, so the bytes are always
+ * served as the type they were registered as at upload time - and a caller can't change
+ * how a file is interpreted by editing the URL.
+ */
+export interface SignedObject {
+  key: string;
+  contentType: string | null;
+}
+
 function sign(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("hex");
 }
@@ -38,11 +49,14 @@ export class LocalFsStorageDriver implements StorageDriver {
     await writeFile(path, data instanceof ArrayBuffer ? new Uint8Array(data) : data);
   }
 
-  async getSignedUrl(key: string, opts?: { expiresInSeconds?: number }): Promise<string> {
+  async getSignedUrl(key: string, opts?: { expiresInSeconds?: number; contentType?: string | null }): Promise<string> {
     const expiresAt = Date.now() + (opts?.expiresInSeconds ?? 300) * 1000;
-    const payload = `${key}:${expiresAt}`;
-    const signature = sign(payload, this.opts.signingSecret);
-    const token = Buffer.from(`${payload}:${signature}`).toString("base64url");
+    // JSON inside the signed blob rather than the old `key:expiry` string: the payload now
+    // carries a third field, and content types contain colons and slashes of their own,
+    // which positional splitting on ":" can't survive.
+    const payload = JSON.stringify({ k: key, e: expiresAt, t: opts?.contentType ?? null });
+    const encoded = Buffer.from(payload).toString("base64url");
+    const token = `${encoded}.${sign(encoded, this.opts.signingSecret)}`;
     return `${this.opts.servePath}/${token}`;
   }
 
@@ -56,23 +70,31 @@ export class LocalFsStorageDriver implements StorageDriver {
   }
 }
 
-/** Verifies a token minted by `getSignedUrl`, returning the object key if valid. */
-export function verifySignedToken(token: string, signingSecret: string): string {
-  const decoded = Buffer.from(token, "base64url").toString("utf8");
-  const lastColon = decoded.lastIndexOf(":");
-  const payload = decoded.slice(0, lastColon);
-  const signature = decoded.slice(lastColon + 1);
-  const expected = sign(payload, signingSecret);
+/** Verifies a token minted by `getSignedUrl`, returning the signed object if valid. */
+export function verifySignedToken(token: string, signingSecret: string): SignedObject {
+  const dot = token.lastIndexOf(".");
+  if (dot < 1) throw new Error("malformed token");
+  const encoded = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
 
+  // Signature first, always: everything below trusts the payload, so nothing may parse it
+  // before we know it's ours.
+  const expected = sign(encoded, signingSecret);
   const sigBuf = Buffer.from(signature, "hex");
   const expBuf = Buffer.from(expected, "hex");
   if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
     throw new Error("invalid signature");
   }
 
-  const [key, expiresAtStr] = payload.split(":");
-  if (!key || Number(expiresAtStr) < Date.now()) {
-    throw new Error("expired or malformed token");
+  let parsed: { k?: unknown; e?: unknown; t?: unknown };
+  try {
+    parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("malformed token");
   }
-  return key;
+  if (typeof parsed.k !== "string" || !parsed.k || typeof parsed.e !== "number") {
+    throw new Error("malformed token");
+  }
+  if (parsed.e < Date.now()) throw new Error("expired token");
+  return { key: parsed.k, contentType: typeof parsed.t === "string" ? parsed.t : null };
 }

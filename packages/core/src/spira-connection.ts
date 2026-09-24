@@ -1,6 +1,7 @@
 import { type TenantTx, schema } from "@galm/db";
 import { eq } from "drizzle-orm";
 import { DomainError } from "./errors";
+import { assertSafeOutboundUrl, normalizeOutboundUrl } from "./outbound-url";
 
 export interface SpiraConnectionInput {
   baseUrl: string;
@@ -20,6 +21,17 @@ export async function getSpiraConnection(db: TenantTx, tenantId: string) {
 
 export async function saveSpiraConnection(db: TenantTx, tenantId: string, input: SpiraConnectionInput) {
   const existing = await getSpiraConnection(db, tenantId);
+  const baseUrl = assertSafeOutboundUrl(input.baseUrl, "The Spira base URL");
+
+  // Carrying the saved key over to a *different* base URL is how a saved credential walks
+  // out of the building: change the host, leave apiKey empty, hit "Test connection", and
+  // the stored key is handed to whatever now answers at that address. Keeping the key
+  // across edits is a real convenience (see SpiraConnectionInput.apiKey) - it just can't
+  // survive a change of who we're sending it to.
+  if (existing && baseUrl !== normalizeOutboundUrl(existing.baseUrl) && !input.apiKey) {
+    throw new DomainError("Re-enter the API key to point this connection at a different base URL.");
+  }
+
   const apiKey = input.apiKey || existing?.apiKey;
   if (!apiKey) {
     throw new DomainError("an API key is required (this connection has never been saved before)");
@@ -29,7 +41,7 @@ export async function saveSpiraConnection(db: TenantTx, tenantId: string, input:
     .insert(schema.spiraConnections)
     .values({
       tenantId,
-      baseUrl: input.baseUrl,
+      baseUrl,
       apiVersion: input.apiVersion,
       username: input.username,
       apiKey,
@@ -38,7 +50,7 @@ export async function saveSpiraConnection(db: TenantTx, tenantId: string, input:
     .onConflictDoUpdate({
       target: schema.spiraConnections.tenantId,
       set: {
-        baseUrl: input.baseUrl,
+        baseUrl,
         apiVersion: input.apiVersion,
         username: input.username,
         apiKey,

@@ -46,6 +46,13 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://app_runtime:app_runtime_dev_password@postgres:5432/galm
+      # Registration/invite-acceptance are rate limited per client IP (see
+      # apps/web/src/server/rate-limit.ts), defaulting to better-auth's own 3-per-10s on
+      # /sign-up. Raised here - and ONLY here, in the local dev/test stack - because
+      # tests/e2e.test.ts registers ~157 tenants from a single IP in about eight seconds.
+      # A real deployment should leave these unset to get the strict defaults.
+      REGISTER_RATE_LIMIT_MAX: "100000"
+      ACCEPT_INVITE_RATE_LIMIT_MAX: "100000"
     ports:
       - "3000:3000"
     volumes:

@@ -66,7 +66,7 @@ export function TopBar({
 
 function UserCorner() {
   const session = authClient.useSession();
-  const user = session.data?.user as { name?: string; email?: string } | undefined;
+  const user = session.data?.user as { name?: string; email?: string; isSystemAdmin?: boolean } | undefined;
   const initials = initialsFor(user?.name, user?.email);
 
   return (
@@ -87,6 +87,12 @@ function UserCorner() {
           <DropdownMenuGroup>
             <DropdownMenuLabel className="truncate font-normal text-muted-foreground">{user?.email}</DropdownMenuLabel>
           </DropdownMenuGroup>
+          {user?.isSystemAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem render={<Link href="/admin" />}>System admin</DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuSeparator />
           <div className="px-1.5 py-1">
             <SignOutButton />

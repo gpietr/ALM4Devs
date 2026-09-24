@@ -47,6 +47,26 @@ async function getVerificationLink(email: string): Promise<string> {
   throw new Error(`No verification email found for ${email} in Mailpit within timeout`);
 }
 
+/** Mirrors getVerificationLink - polls Mailpit for the invitation email sent to `email`
+ * (apps/worker's send-invitation-email job), returning the accept-invite link. */
+async function getInvitationLink(email: string): Promise<string> {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const searchRes = await fetch(`${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`);
+    if (searchRes.ok) {
+      const search = (await searchRes.json()) as { messages: { ID: string }[] };
+      const latest = search.messages[0];
+      if (latest) {
+        const msgRes = await fetch(`${MAILPIT_URL}/api/v1/message/${latest.ID}`);
+        const msg = (await msgRes.json()) as { Text: string };
+        const match = msg.Text.match(/https?:\/\/\S+accept-invite\S+/);
+        if (match) return match[0];
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`No invitation email found for ${email} in Mailpit within timeout`);
+}
+
 function parseCookie(res: Response): string {
   const setCookies = res.headers.getSetCookie?.() ?? [];
   return setCookies.map((c) => c.split(";")[0]).join("; ");
@@ -4343,5 +4363,573 @@ describe("e2e: email verification on registration", () => {
 
     const link = await getVerificationLink(tenant.email);
     expect(link).toContain("verify-email");
+  }, 20000);
+});
+
+describe("e2e: org roles, invitations, and system admin", () => {
+  test("the first user of a newly-registered tenant is an admin", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const list = await rpc(tenant.cookie, "GET", "members.list");
+    expect(list.ok).toBe(true);
+    const self = list.data.members.find((m: { id: string }) => m.id === tenant.userId);
+    expect(self.role).toBe("admin");
+  });
+
+  test("invite -> accept produces a member with the offered role, emailVerified already true, and an immediately usable session", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const inviteeEmail = `e2e-invitee-${uniqueSuffix()}@example.com`;
+
+    const invite = await rpc(tenant.cookie, "POST", "members.invite", { email: inviteeEmail, role: "member" });
+    expect(invite.ok).toBe(true);
+
+    const link = await getInvitationLink(inviteeEmail);
+    const url = new URL(link);
+
+    const res = await fetch(`${BASE_URL}/api/accept-invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: url.searchParams.get("token"),
+        tenantId: url.searchParams.get("tenant"),
+        name: "Invited Person",
+        password: "correct horse battery staple",
+      }),
+    });
+    expect(res.ok).toBe(true);
+    const cookie = parseCookie(res);
+    const body = (await res.json()) as { user: { id: string; role: string; tenantId: string } };
+    expect(body.user.role).toBe("member");
+    expect(body.user.tenantId).toBe(tenant.tenantId);
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const [row] = await sql`select email_verified from "user" where id = ${body.user.id}`;
+    await sql.close();
+    expect(row.email_verified).toBe(true);
+
+    // Usable immediately - no separate verify-email step required.
+    const me = await rpc(cookie, "GET", "members.list");
+    expect(me.ok).toBe(true);
+  }, 20000);
+
+  test("a non-admin member gets FORBIDDEN on invite/updateRole/remove", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const memberEmail = `e2e-member-${uniqueSuffix()}@example.com`;
+
+    await rpc(tenant.cookie, "POST", "members.invite", { email: memberEmail, role: "member" });
+    const link = await getInvitationLink(memberEmail);
+    const url = new URL(link);
+    const acceptRes = await fetch(`${BASE_URL}/api/accept-invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: url.searchParams.get("token"),
+        tenantId: url.searchParams.get("tenant"),
+        name: "Regular Member",
+        password: "correct horse battery staple",
+      }),
+    });
+    const memberCookie = parseCookie(acceptRes);
+    const memberBody = (await acceptRes.json()) as { user: { id: string } };
+
+    const inviteAttempt = await rpc(memberCookie, "POST", "members.invite", {
+      email: `e2e-other-${uniqueSuffix()}@example.com`,
+      role: "member",
+    });
+    expect(inviteAttempt.status).toBe(403);
+
+    const roleAttempt = await rpc(memberCookie, "POST", "members.updateRole", {
+      userId: tenant.userId,
+      role: "member",
+    });
+    expect(roleAttempt.status).toBe(403);
+
+    const removeAttempt = await rpc(memberCookie, "POST", "members.remove", { userId: memberBody.user.id });
+    expect(removeAttempt.status).toBe(403);
+  }, 20000);
+
+  test("removing a member blocks their further access", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const memberEmail = `e2e-removed-${uniqueSuffix()}@example.com`;
+
+    await rpc(tenant.cookie, "POST", "members.invite", { email: memberEmail, role: "member" });
+    const link = await getInvitationLink(memberEmail);
+    const url = new URL(link);
+    const acceptRes = await fetch(`${BASE_URL}/api/accept-invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: url.searchParams.get("token"),
+        tenantId: url.searchParams.get("tenant"),
+        name: "Soon Removed",
+        password: "correct horse battery staple",
+      }),
+    });
+    const memberCookie = parseCookie(acceptRes);
+    const memberBody = (await acceptRes.json()) as { user: { id: string } };
+
+    const beforeRemoval = await rpc(memberCookie, "GET", "members.list");
+    expect(beforeRemoval.ok).toBe(true);
+
+    const removed = await rpc(tenant.cookie, "POST", "members.remove", { userId: memberBody.user.id });
+    expect(removed.ok).toBe(true);
+
+    const afterRemoval = await rpc(memberCookie, "GET", "members.list");
+    expect(afterRemoval.status).toBe(403);
+  }, 20000);
+
+  test("a non-system-admin gets FORBIDDEN from admin.* routes", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const res = await rpc(tenant.cookie, "GET", "admin.listTenants");
+    expect(res.status).toBe(403);
+  });
+
+  test("system admin can list tenants and suspend one; a suspended tenant's user is blocked", async () => {
+    const adminTenant = await registerTenant(`E2E Admin Org ${uniqueSuffix()}`);
+    const targetTenant = await registerTenant(`E2E Target Org ${uniqueSuffix()}`);
+
+    // There's no HTTP path to become a system admin, by design - see
+    // scripts/set-system-admin.ts. Flip it directly, the same way other tests reach into
+    // Postgres directly for things outside the HTTP surface.
+    const sql = new SQL(PG_SUPERUSER_URL);
+    await sql`update "user" set is_system_admin = true where id = ${adminTenant.userId}`;
+    await sql.close();
+
+    const list = await rpc(adminTenant.cookie, "GET", "admin.listTenants");
+    expect(list.ok).toBe(true);
+    expect(list.data.some((t: { id: string }) => t.id === targetTenant.tenantId)).toBe(true);
+
+    const suspend = await rpc(adminTenant.cookie, "POST", "admin.setTenantSuspended", {
+      tenantId: targetTenant.tenantId,
+      suspended: true,
+    });
+    expect(suspend.ok).toBe(true);
+
+    const blocked = await rpc(targetTenant.cookie, "GET", "members.list");
+    expect(blocked.status).toBe(403);
+  });
+});
+
+describe("e2e: authorization hardening", () => {
+  /** Shared setup: an org with its admin plus one accepted, plain-member invitee. */
+  async function orgWithMember(label: string) {
+    const admin = await registerTenant(`E2E ${label} ${uniqueSuffix()}`);
+    const memberEmail = `e2e-${label.toLowerCase()}-${uniqueSuffix()}@example.com`;
+    const invited = await rpc(admin.cookie, "POST", "members.invite", { email: memberEmail, role: "member" });
+    expect(invited.ok).toBe(true);
+
+    const url = new URL(await getInvitationLink(memberEmail));
+    const res = await fetch(`${BASE_URL}/api/accept-invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: url.searchParams.get("token"),
+        tenantId: url.searchParams.get("tenant"),
+        name: "Plain Member",
+        password: "correct horse battery staple",
+      }),
+    });
+    expect(res.ok).toBe(true);
+    const body = (await res.json()) as { user: { id: string } };
+    return { admin, member: { cookie: parseCookie(res), id: body.user.id, email: memberEmail } };
+  }
+
+  // A member who can set their own `role` or `tenantId` through better-auth's generic
+  // user-update endpoint makes orgAdminProcedure and RLS tenant scoping both decorative -
+  // additionalFields.tenantId/role are input:true so our two in-process signUpEmail
+  // callers can set them at creation, which also exposed them to /update-user.
+  test("a member can't self-promote to admin via better-auth's /update-user", async () => {
+    const { admin, member } = await orgWithMember("SelfPromote");
+
+    const escalate = await fetch(`${BASE_URL}/api/auth/update-user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: member.cookie, origin: BASE_URL },
+      body: JSON.stringify({ role: "admin" }),
+    });
+    expect(escalate.status).toBe(404);
+
+    // The authorization decision itself must be unchanged, not just the HTTP call refused.
+    const stillForbidden = await rpc(member.cookie, "POST", "members.remove", { userId: admin.userId });
+    expect(stillForbidden.status).toBe(403);
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const [row] = await sql`select role from "user" where id = ${member.id}`;
+    await sql.close();
+    expect(row.role).toBe("member");
+  }, 20000);
+
+  test("a user can't move their session into another tenant via /update-user", async () => {
+    const victim = await registerTenant(`E2E Victim ${uniqueSuffix()}`);
+    const attacker = await registerTenant(`E2E Attacker ${uniqueSuffix()}`);
+
+    const escalate = await fetch(`${BASE_URL}/api/auth/update-user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: attacker.cookie, origin: BASE_URL },
+      body: JSON.stringify({ tenantId: victim.tenantId }),
+    });
+    expect(escalate.status).toBe(404);
+
+    // Still sees only their own org - withTenant's RLS scope follows session.tenantId.
+    const list = await rpc(attacker.cookie, "GET", "members.list");
+    expect(list.ok).toBe(true);
+    expect(list.data.members.map((m: { email: string }) => m.email)).toEqual([attacker.email]);
+  }, 20000);
+
+  test("the public sign-up endpoint stays closed", async () => {
+    const res = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", origin: BASE_URL },
+      body: JSON.stringify({
+        name: "Interloper",
+        email: `e2e-signup-${uniqueSuffix()}@example.com`,
+        password: "correct horse battery staple",
+        tenantId: crypto.randomUUID(),
+        role: "admin",
+      }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // The removed/suspended gate used to live only in protectedProcedure and (app)/layout,
+  // so every route handler returning binary/redirect responses skipped it entirely.
+  test("a removed member is blocked from the non-tRPC API routes too", async () => {
+    const { admin, member } = await orgWithMember("RemovedRest");
+
+    const upload = await fetch(`${BASE_URL}/api/attachments/upload`, {
+      method: "POST",
+      headers: { cookie: member.cookie, "content-type": "text/plain", "x-filename": "before.txt" },
+      body: "before",
+    });
+    expect(upload.ok).toBe(true);
+
+    expect((await rpc(admin.cookie, "POST", "members.remove", { userId: member.id })).ok).toBe(true);
+
+    for (const [name, res] of [
+      [
+        "attachments/upload",
+        await fetch(`${BASE_URL}/api/attachments/upload`, {
+          method: "POST",
+          headers: { cookie: member.cookie, "content-type": "text/plain", "x-filename": "after.txt" },
+          body: "after",
+        }),
+      ],
+      [
+        "storage/upload",
+        await fetch(`${BASE_URL}/api/storage/upload`, {
+          method: "POST",
+          headers: { cookie: member.cookie },
+          body: "after",
+        }),
+      ],
+      [
+        "documents/generate",
+        await fetch(`${BASE_URL}/api/documents/generate`, {
+          method: "POST",
+          headers: { cookie: member.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ templateId: crypto.randomUUID() }),
+        }),
+      ],
+      [
+        "reauth",
+        await fetch(`${BASE_URL}/api/reauth`, {
+          method: "POST",
+          headers: { cookie: member.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "correct horse battery staple" }),
+        }),
+      ],
+    ] as const) {
+      expect(`${name}:${res.status}`).toBe(`${name}:403`);
+    }
+  }, 30000);
+
+  test("a suspended tenant's member is blocked from the non-tRPC API routes", async () => {
+    const target = await registerTenant(`E2E SuspendedRest ${uniqueSuffix()}`);
+    const sysAdmin = await registerTenant(`E2E SuspendAdmin ${uniqueSuffix()}`);
+    const sql = new SQL(PG_SUPERUSER_URL);
+    await sql`update "user" set is_system_admin = true where id = ${sysAdmin.userId}`;
+    await sql.close();
+
+    const suspend = await rpc(sysAdmin.cookie, "POST", "admin.setTenantSuspended", {
+      tenantId: target.tenantId,
+      suspended: true,
+    });
+    expect(suspend.ok).toBe(true);
+
+    const upload = await fetch(`${BASE_URL}/api/attachments/upload`, {
+      method: "POST",
+      headers: { cookie: target.cookie, "content-type": "text/plain", "x-filename": "nope.txt" },
+      body: "nope",
+    });
+    expect(upload.status).toBe(403);
+  }, 20000);
+
+  // An admin-less tenant can't invite, manage members or promote anyone, and has no
+  // self-service way back - migration 023's backfill exists because of exactly that state.
+  test("the last admin can't be removed or demoted", async () => {
+    const { admin, member } = await orgWithMember("LastAdmin");
+
+    const demote = await rpc(admin.cookie, "POST", "members.updateRole", { userId: admin.userId, role: "member" });
+    expect(demote.status).toBe(400);
+    expect(demote.error?.message).toContain("last admin");
+
+    const remove = await rpc(admin.cookie, "POST", "members.remove", { userId: admin.userId });
+    expect(remove.status).toBe(400);
+    expect(remove.error?.message).toContain("last admin");
+
+    // With a second admin in place, the original is free to go.
+    expect((await rpc(admin.cookie, "POST", "members.updateRole", { userId: member.id, role: "admin" })).ok).toBe(true);
+    expect((await rpc(admin.cookie, "POST", "members.remove", { userId: admin.userId })).ok).toBe(true);
+  }, 20000);
+
+  test("a failed registration leaves no orphaned tenant behind", async () => {
+    const first = await registerTenant(`E2E Orphan ${uniqueSuffix()}`);
+    const orgName = `E2E Orphan Retry ${uniqueSuffix()}`;
+
+    // Same email as an existing account: registration must fail *without* having created
+    // the organization row and its seeded defaults first.
+    const res = await fetch(`${BASE_URL}/api/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orgName, name: "Dup", email: first.email, password: "correct horse battery staple" }),
+    });
+    expect(res.ok).toBe(false);
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const rows = await sql`select id from tenants where name = ${orgName}`;
+    await sql.close();
+    expect(rows.length).toBe(0);
+  }, 20000);
+
+  test("membership and system-admin changes are written to the audit log", async () => {
+    const { admin, member } = await orgWithMember("Audited");
+    expect((await rpc(admin.cookie, "POST", "members.updateRole", { userId: member.id, role: "admin" })).ok).toBe(true);
+
+    const sysAdmin = await registerTenant(`E2E AuditAdmin ${uniqueSuffix()}`);
+    const sql = new SQL(PG_SUPERUSER_URL);
+    await sql`update "user" set is_system_admin = true where id = ${sysAdmin.userId}`;
+    await sql.close();
+
+    const suspend = await rpc(sysAdmin.cookie, "POST", "admin.setTenantSuspended", {
+      tenantId: admin.tenantId,
+      suspended: true,
+    });
+    expect(suspend.ok).toBe(true);
+
+    const sql2 = new SQL(PG_SUPERUSER_URL);
+    const rows = await sql2`
+      select action, actor_user_id, entity_id from audit_log
+      where tenant_id = ${admin.tenantId}
+        and (action like ${"member.%"} or action like ${"admin.%"})`;
+    await sql2.close();
+
+    const byAction = new Map<string, { actor_user_id: string; entity_id: string }>(
+      (rows as { action: string; actor_user_id: string; entity_id: string }[]).map((r) => [r.action, r]),
+    );
+    expect(byAction.has("member.invited")).toBe(true);
+    expect(byAction.get("member.role_changed")?.entity_id).toBe(member.id);
+    // Recorded against the affected tenant, attributed to the system admin who did it.
+    expect(byAction.get("admin.tenant_suspended")?.actor_user_id).toBe(sysAdmin.userId);
+  }, 30000);
+
+  test("a system admin can't revoke their own system-admin flag", async () => {
+    const sysAdmin = await registerTenant(`E2E SelfRevoke ${uniqueSuffix()}`);
+    const sql = new SQL(PG_SUPERUSER_URL);
+    await sql`update "user" set is_system_admin = true where id = ${sysAdmin.userId}`;
+    await sql.close();
+
+    const res = await rpc(sysAdmin.cookie, "POST", "admin.setUserSystemAdmin", {
+      userId: sysAdmin.userId,
+      isSystemAdmin: false,
+    });
+    expect(res.status).toBe(400);
+    expect((await rpc(sysAdmin.cookie, "GET", "admin.listTenants")).ok).toBe(true);
+  }, 20000);
+});
+
+describe("e2e: integration connection hardening", () => {
+  /** An org admin plus one accepted, plain-member invitee in the same tenant. */
+  async function orgWithMember(label: string) {
+    const admin = await registerTenant(`E2E ${label} ${uniqueSuffix()}`);
+    const memberEmail = `e2e-${label.toLowerCase()}-${uniqueSuffix()}@example.com`;
+    expect((await rpc(admin.cookie, "POST", "members.invite", { email: memberEmail, role: "member" })).ok).toBe(true);
+    const url = new URL(await getInvitationLink(memberEmail));
+    const res = await fetch(`${BASE_URL}/api/accept-invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: url.searchParams.get("token"),
+        tenantId: url.searchParams.get("tenant"),
+        name: "Plain Member",
+        password: "correct horse battery staple",
+      }),
+    });
+    expect(res.ok).toBe(true);
+    return { admin, memberCookie: parseCookie(res) };
+  }
+
+  const SPIRA = {
+    baseUrl: "https://spira.example.com/Services/v7_0/RestService.svc",
+    apiVersion: "v7_0",
+    username: "svc-alm",
+    projectId: 1,
+  };
+
+  // Saving a connection keeps the stored API key when apiKey is omitted. Combined with an
+  // editable base URL that made it a credential-exfiltration primitive: repoint the host,
+  // omit the key, and the server posts the saved secret to whoever answers.
+  test("a member can't change the Spira connection, and an admin can't redirect a saved key", async () => {
+    const { admin, memberCookie } = await orgWithMember("SpiraGate");
+
+    const saved = await rpc(admin.cookie, "POST", "spiraImport.saveConnection", {
+      ...SPIRA,
+      apiKey: "super-secret-spira-key",
+    });
+    expect(saved.ok).toBe(true);
+
+    // A member may see the redacted connection, but not touch it.
+    const visible = await rpc(memberCookie, "GET", "spiraImport.getConnection");
+    expect(visible.ok).toBe(true);
+    expect(visible.data.hasApiKey).toBe(true);
+    expect(visible.data).not.toHaveProperty("apiKey");
+
+    const memberWrite = await rpc(memberCookie, "POST", "spiraImport.saveConnection", {
+      ...SPIRA,
+      baseUrl: "https://evil.example.com",
+    });
+    expect(memberWrite.status).toBe(403);
+    expect((await rpc(memberCookie, "POST", "spiraImport.testConnection")).status).toBe(403);
+
+    // Even an admin has to re-type the key to point it somewhere new.
+    const redirect = await rpc(admin.cookie, "POST", "spiraImport.saveConnection", {
+      ...SPIRA,
+      baseUrl: "https://evil.example.com",
+    });
+    expect(redirect.status).toBe(400);
+    expect(redirect.error?.message).toContain("Re-enter the API key");
+
+    // The stored connection is untouched by the rejected attempt.
+    const after = await rpc(admin.cookie, "GET", "spiraImport.getConnection");
+    expect(after.data.baseUrl).toContain("spira.example.com");
+
+    // Editing an unrelated field without the key still works.
+    expect((await rpc(admin.cookie, "POST", "spiraImport.saveConnection", { ...SPIRA, projectId: 9 })).ok).toBe(true);
+  }, 30000);
+
+  test.each([
+    ["cloud metadata", "http://169.254.169.254/latest/meta-data/"],
+    ["loopback", "http://127.0.0.1:3000/"],
+    ["private range", "http://192.168.1.10/"],
+    ["container hostname", "http://postgres:5432/"],
+    ["non-http scheme", "file:///etc/passwd"],
+  ])("the Spira base URL rejects %s", async (_label, baseUrl) => {
+    const admin = await registerTenant(`E2E SSRF ${uniqueSuffix()}`);
+    const res = await rpc(admin.cookie, "POST", "spiraImport.saveConnection", {
+      ...SPIRA,
+      baseUrl,
+      apiKey: "k",
+    });
+    expect(res.status).toBe(400);
+  }, 20000);
+
+  test("a member can't change the AI connection, and switching provider needs the key again", async () => {
+    const { admin, memberCookie } = await orgWithMember("AiGate");
+
+    expect(
+      (await rpc(admin.cookie, "POST", "llm.saveConnection", {
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+        apiKey: "super-secret-anthropic-key",
+      })).ok,
+    ).toBe(true);
+
+    expect(
+      (await rpc(memberCookie, "POST", "llm.saveConnection", {
+        provider: "openai_compatible",
+        model: "m",
+        baseUrl: "https://evil.example.com/v1",
+      })).status,
+    ).toBe(403);
+    expect((await rpc(memberCookie, "POST", "llm.testConnection")).status).toBe(403);
+
+    // Switching provider redirects where the saved key gets sent, so it counts as a
+    // redirect even though baseUrl was previously null.
+    const switched = await rpc(admin.cookie, "POST", "llm.saveConnection", {
+      provider: "openai_compatible",
+      model: "m",
+      baseUrl: "https://evil.example.com/v1",
+    });
+    expect(switched.status).toBe(400);
+    expect(switched.error?.message).toContain("Re-enter the API key");
+  }, 30000);
+
+  test("a member can't change the NVD connection", async () => {
+    const { memberCookie } = await orgWithMember("NvdGate");
+    expect((await rpc(memberCookie, "POST", "vulnerabilities.saveConnection", { apiKey: "x" })).status).toBe(403);
+    expect((await rpc(memberCookie, "POST", "vulnerabilities.testConnection")).status).toBe(403);
+  }, 30000);
+
+  // Uploaded bytes are served from this app's own origin, so anything the browser will
+  // execute there runs with the viewer's session.
+  test("an uploaded HTML attachment is served as an inert download, not as HTML", async () => {
+    const tenant = await registerTenant(`E2E Sniff ${uniqueSuffix()}`);
+    const up = await fetch(`${BASE_URL}/api/attachments/upload`, {
+      method: "POST",
+      headers: { cookie: tenant.cookie, "content-type": "text/html", "x-filename": "evil.html" },
+      body: "<script>alert(document.domain)</script>",
+    });
+    expect(up.ok).toBe(true);
+    const { url } = (await up.json()) as { url: string };
+
+    const redirect = await fetch(`${BASE_URL}${url}`, { headers: { cookie: tenant.cookie }, redirect: "manual" });
+    expect(redirect.status).toBe(307);
+    const file = await fetch(new URL(redirect.headers.get("location")!, BASE_URL));
+    expect(file.status).toBe(200);
+    expect(file.headers.get("content-type")).toBe("application/octet-stream");
+    expect(file.headers.get("content-disposition")).toBe("attachment");
+    expect(file.headers.get("x-content-type-options")).toBe("nosniff");
+  }, 20000);
+
+  test("an uploaded image is still served inline with its real type", async () => {
+    const tenant = await registerTenant(`E2E Inline ${uniqueSuffix()}`);
+    // Smallest valid PNG.
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const up = await fetch(`${BASE_URL}/api/attachments/upload`, {
+      method: "POST",
+      headers: { cookie: tenant.cookie, "content-type": "image/png", "x-filename": "pixel.png" },
+      body: png,
+    });
+    const { url } = (await up.json()) as { url: string };
+    const redirect = await fetch(`${BASE_URL}${url}`, { headers: { cookie: tenant.cookie }, redirect: "manual" });
+    const file = await fetch(new URL(redirect.headers.get("location")!, BASE_URL));
+    expect(file.headers.get("content-type")).toBe("image/png");
+    expect(file.headers.get("content-disposition")).toBeNull();
+    expect(file.headers.get("x-content-type-options")).toBe("nosniff");
+  }, 20000);
+
+  test("a tampered or expired storage token is refused", async () => {
+    const tenant = await registerTenant(`E2E Token ${uniqueSuffix()}`);
+    const up = await fetch(`${BASE_URL}/api/attachments/upload`, {
+      method: "POST",
+      headers: { cookie: tenant.cookie, "content-type": "text/plain", "x-filename": "a.txt" },
+      body: "hello",
+    });
+    const { url } = (await up.json()) as { url: string };
+    const redirect = await fetch(`${BASE_URL}${url}`, { headers: { cookie: tenant.cookie }, redirect: "manual" });
+    const signed = new URL(redirect.headers.get("location")!, BASE_URL);
+    const token = signed.pathname.split("/").pop()!;
+
+    // Re-sign the payload with a different key by swapping the signature half.
+    const [payload] = token.split(".");
+    const forged = `${payload}.${"0".repeat(64)}`;
+    expect((await fetch(`${BASE_URL}/api/storage/file/${forged}`)).status).toBe(403);
+
+    // Swap the payload for one naming a different key, keeping the original signature.
+    const otherPayload = Buffer.from(
+      JSON.stringify({ k: "other-tenant/secret", e: Date.now() + 60000, t: "text/plain" }),
+    ).toString("base64url");
+    const [, sig] = token.split(".");
+    expect((await fetch(`${BASE_URL}/api/storage/file/${otherPayload}.${sig}`)).status).toBe(403);
   }, 20000);
 });

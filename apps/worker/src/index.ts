@@ -1,5 +1,5 @@
 import { createAppDb, schema } from "@galm/db";
-import { sendEmail, verificationEmailTemplate } from "@galm/email";
+import { invitationEmailTemplate, sendEmail, verificationEmailTemplate } from "@galm/email";
 import { registerWorker } from "@galm/jobs";
 
 const db = createAppDb();
@@ -16,6 +16,19 @@ async function main() {
     "send-verification-email",
     async (data) => {
       const { subject, html, text } = verificationEmailTemplate({ name: data.name, url: data.url });
+      await sendEmail({ to: data.to, subject, html, text });
+    },
+  );
+
+  await registerWorker<{ to: string; orgName: string; inviterName: string; role: string; url: string }>(
+    "send-invitation-email",
+    async (data) => {
+      const { subject, html, text } = invitationEmailTemplate({
+        orgName: data.orgName,
+        inviterName: data.inviterName,
+        role: data.role,
+        url: data.url,
+      });
       await sendEmail({ to: data.to, subject, html, text });
     },
   );

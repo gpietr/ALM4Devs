@@ -14,7 +14,7 @@ import { withTenant } from "@galm/db";
 import { createNvdClient, type NvdClient, scanArchitectureNode } from "@galm/integrations-nvd";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, router } from "../trpc";
+import { orgAdminProcedure, protectedProcedure, router } from "../trpc";
 
 function tenantOf(ctx: { session: { user: unknown } }): string {
   return (ctx.session.user as { tenantId: string }).tenantId;
@@ -46,7 +46,7 @@ export const vulnerabilitiesRouter = router({
     return { hasApiKey, suggestedThrottleMs: hasApiKey ? THROTTLE_MS_WITH_KEY : THROTTLE_MS_WITHOUT_KEY };
   }),
 
-  saveConnection: protectedProcedure
+  saveConnection: orgAdminProcedure
     .input(z.object({ apiKey: z.string().trim().max(500).nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const tenantId = tenantOf(ctx);
@@ -54,7 +54,7 @@ export const vulnerabilitiesRouter = router({
       return { ok: true };
     }),
 
-  testConnection: protectedProcedure.mutation(async ({ ctx }) => {
+  testConnection: orgAdminProcedure.mutation(async ({ ctx }) => {
     const tenantId = tenantOf(ctx);
     const client = await buildNvdClient(tenantId);
     try {

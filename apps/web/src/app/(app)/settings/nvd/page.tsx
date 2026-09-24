@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc-client";
+import { useIsOrgAdmin } from "@/lib/use-org-admin";
 import { useState } from "react";
 
 /**
@@ -17,6 +18,7 @@ import { useState } from "react";
  */
 export default function NvdSettingsPage() {
   const utils = trpc.useUtils();
+  const isOrgAdmin = useIsOrgAdmin();
   const connection = trpc.vulnerabilities.getConnection.useQuery();
   const saveConnection = trpc.vulnerabilities.saveConnection.useMutation({
     onSuccess: () => utils.vulnerabilities.getConnection.invalidate(),
@@ -40,6 +42,12 @@ export default function NvdSettingsPage() {
 
       <Card className="max-w-2xl p-4">
         <h2 className="text-sm font-medium text-foreground">Connection</h2>
+        {!isOrgAdmin && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Only organization admins can change the NVD connection. Scanning still works for
+            everyone with whatever key is saved here.
+          </p>
+        )}
         <form
           className="mt-3 space-y-3"
           onSubmit={(e) => {
@@ -51,17 +59,17 @@ export default function NvdSettingsPage() {
             <span className="text-xs font-medium text-muted-foreground">
               API key {connection.data?.hasApiKey && "(leave blank to keep the saved one, or clear it below)"}
             </span>
-            <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+            <Input type="password" disabled={!isOrgAdmin} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
           </Label>
           <div className="flex items-center gap-2">
-            <Button type="submit" disabled={saveConnection.isPending}>
+            <Button type="submit" disabled={!isOrgAdmin || saveConnection.isPending}>
               {saveConnection.isPending ? "Saving..." : "Save"}
             </Button>
             {connection.data?.hasApiKey && (
               <Button
                 type="button"
                 variant="outline"
-                disabled={saveConnection.isPending}
+                disabled={!isOrgAdmin || saveConnection.isPending}
                 onClick={() => {
                   setApiKey("");
                   saveConnection.mutate({ apiKey: null });
@@ -73,7 +81,7 @@ export default function NvdSettingsPage() {
             <Button
               type="button"
               variant="outline"
-              disabled={testConnection.isPending}
+              disabled={!isOrgAdmin || testConnection.isPending}
               onClick={() => testConnection.mutate()}
             >
               {testConnection.isPending ? "Testing..." : "Test connection"}

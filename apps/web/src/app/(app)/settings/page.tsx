@@ -62,6 +62,16 @@ const SECTIONS: ReadonlyArray<{
     ],
   },
   {
+    group: "Organization",
+    items: [
+      {
+        href: "/settings/members",
+        title: "Members",
+        description: "Invite teammates and manage roles.",
+      },
+    ],
+  },
+  {
     group: "Integrations",
     items: [
       {

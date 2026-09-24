@@ -23,6 +23,11 @@ import {
 export const tenants = pgTable("tenants", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
+  // System-admin-only kill switch (apps/web/src/server/routers/admin.ts): blocks every
+  // user of this tenant from using the app while true. tenants has no RLS (it's the
+  // tenant-defining table itself), so this is a plain column read - see
+  // apps/web/src/server/tenant-access.ts.
+  suspended: boolean("suspended").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -39,6 +44,21 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  // Org-level role within this user's one tenant, 'admin' | 'member' (CHECK-constrained in
+  // migrations-manual/023, same text+CHECK convention as requirementStatuses.category -
+  // see apps/web/src/server/trpc.ts's orgAdminProcedure). Always set explicitly by
+  // whichever flow creates the user (/api/register: "admin"; /api/accept-invite: whatever
+  // the invitation offered) - the 'member' default is just the safe fallback direction.
+  role: text("role").notNull().default("member"),
+  // Flat, cross-tenant, unrelated to role above. Only scripts/set-system-admin.ts ever
+  // sets this - see apps/web/src/lib/auth.ts's additionalFields (input: false).
+  isSystemAdmin: boolean("is_system_admin").notNull().default(false),
+  // Soft-removal from their org (apps/web/src/server/routers/members.ts's `remove`) - not
+  // a row delete, since requirements.createdBy/approvalEvents.actorUserId/etc. reference
+  // user.id with no onDelete override (defaults to NO ACTION), so a hard delete of anyone
+  // who has ever authored/approved anything would fail with an FK violation. Checked by
+  // apps/web/src/server/tenant-access.ts alongside tenants.suspended.
+  removedAt: timestamp("removed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -82,6 +102,41 @@ export const verification = pgTable("verification", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
+// --- org invitations (RLS-protected, migrations-manual/023) -------------------------
+// Hand-rolled invite-a-teammate flow - see apps/web/src/server/routers/members.ts and
+// packages/core/src/members.ts. Token is a stored opaque random value this table owns
+// (like session.token above), not a JWT or better-auth's own `verification` table: the
+// invite UI needs to list and revoke pending invitations, which a stateless token can't
+// support without a second table for bookkeeping anyway.
+
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    // 'admin' | 'member' (CHECK-constrained in migrations-manual/023) - the role this
+    // invitation offers, copied onto the user row at accept time.
+    role: text("role").notNull(),
+    token: text("token").notNull().unique(),
+    invitedBy: text("invited_by")
+      .notNull()
+      .references(() => user.id),
+    // 'pending' | 'accepted' | 'revoked' (CHECK-constrained in migrations-manual/023).
+    // Re-inviting an email with an existing pending invitation updates that row in place
+    // (new token, reset expiry) rather than inserting a duplicate - see
+    // packages/core/src/members.ts's createInvitation.
+    status: text("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("invitations_tenant_email_idx").on(t.tenantId, t.email)],
+);
 
 // --- demo tenant-scoped table, used only to prove RLS isolation ---------------------
 

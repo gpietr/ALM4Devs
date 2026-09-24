@@ -145,11 +145,40 @@ export async function renderPdf(html: string): Promise<Uint8Array> {
     // general possible type (losing the "pipe" literal narrowing TS infers from a direct
     // call with literal options), which `new Response(proc.stderr)` below needs.
     function startProcess() {
-      return Bun.spawn([bin, "--quiet", "--print-media-type", "--encoding", "utf-8", inputPath, outputPath], {
-        stdout: "pipe",
-        stderr: "pipe",
-        env,
-      });
+      return Bun.spawn(
+        [
+          bin,
+          "--quiet",
+          "--print-media-type",
+          "--encoding",
+          "utf-8",
+          // --- Hardening ------------------------------------------------------------
+          // Templates are user-authored HTML (Handlebars). wkhtmltopdf renders them
+          // inside our network, so a template is an SSRF/exfiltration primitive unless
+          // these are set. Authoring is intentionally NOT restricted - the engine is.
+          //
+          // Disables <script> execution. This is the one that turned a template into a
+          // live SSRF tool: JS could XHR an internal endpoint (cloud metadata, a
+          // neighbouring service) synchronously and document.write() the response body
+          // straight into the PDF. Document templates (headings, tables, styling) never
+          // need scripting, so nothing legitimate is lost.
+          "--disable-javascript",
+          // Belt to the engine's own default: this wkhtmltopdf build already refuses
+          // file:// (ProtocolUnknownError), but state it so a future binary swap can't
+          // silently re-open local-file reads (/etc/passwd, our own .env). Safe here
+          // because templates carry no local asset references - images are data: URIs
+          // or remote URLs, and the input document itself is passed positionally, not
+          // loaded via file://.
+          "--disable-local-file-access",
+          inputPath,
+          outputPath,
+        ],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+          env,
+        },
+      );
     }
     let proc: ReturnType<typeof startProcess>;
     try {

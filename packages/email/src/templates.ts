@@ -32,3 +32,37 @@ export function verificationEmailTemplate({ name, url }: { name: string; url: st
 `.trim();
   return { subject, html, text };
 }
+
+/** `url`/`orgName` are server-controlled (built from the invitation row); `inviterName` is
+ * a user-supplied display name, so it's escaped before going into the HTML body. */
+export function invitationEmailTemplate({
+  orgName,
+  inviterName,
+  role,
+  url,
+}: {
+  orgName: string;
+  inviterName: string;
+  role: string;
+  url: string;
+}): VerificationEmailContent {
+  const safeOrg = escapeHtml(orgName);
+  const safeInviter = escapeHtml(inviterName);
+  const roleLabel = role === "admin" ? "an admin" : "a member";
+  const subject = `You've been invited to join ${orgName} on ALM4Devs`;
+  const text = `Hi,\n\n${inviterName} has invited you to join ${orgName} on ALM4Devs as ${roleLabel}.\n\nAccept your invitation:\n${url}\n\nIf you weren't expecting this, you can ignore this email.`;
+  const html = `
+<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; color: #1e293b;">
+  <p>Hi,</p>
+  <p><strong>${safeInviter}</strong> has invited you to join <strong>${safeOrg}</strong> on ALM4Devs as ${roleLabel}.</p>
+  <p>
+    <a href="${url}" style="display:inline-block;padding:10px 16px;background:#1e293b;color:#ffffff;text-decoration:none;border-radius:4px;">
+      Accept invitation
+    </a>
+  </p>
+  <p>Or paste this link into your browser:<br><a href="${url}">${url}</a></p>
+  <p style="color:#64748b;font-size:13px;">If you weren't expecting this, you can ignore this email.</p>
+</div>
+`.trim();
+  return { subject, html, text };
+}

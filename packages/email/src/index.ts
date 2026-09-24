@@ -46,5 +46,5 @@ export async function sendEmail(opts: SendEmailOptions): Promise<void> {
   });
 }
 
-export { verificationEmailTemplate } from "./templates";
+export { invitationEmailTemplate, verificationEmailTemplate } from "./templates";
 export type { VerificationEmailContent } from "./templates";

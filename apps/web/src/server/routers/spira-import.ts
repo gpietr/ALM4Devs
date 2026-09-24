@@ -1,5 +1,9 @@
 import { db } from "@/lib/db";
-import { getSpiraConnection, saveSpiraConnection } from "@galm/core";
+import {
+  getSpiraConnection,
+  sanitizeRichText,
+  saveSpiraConnection,
+} from "@galm/core";
 import { withTenant } from "@galm/db";
 import {
   previewSpiraImport,
@@ -11,7 +15,7 @@ import {
 } from "@galm/integrations-spira";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, router } from "../trpc";
+import { orgAdminProcedure, protectedProcedure, router } from "../trpc";
 
 function tenantOf(ctx: { session: { user: unknown } }): string {
   return (ctx.session.user as { tenantId: string }).tenantId;
@@ -54,6 +58,23 @@ const testCaseMappingSchema = z.object({
   customFields: z.record(z.string().uuid(), z.string()).optional(),
 });
 
+/**
+ * Rich text arriving from Spira has been through no sanitizer at all: it's whatever the
+ * remote instance's API returned. The import's *write* path sanitizes (createRequirement /
+ * createTestCase in @galm/core), but these preview procedures hand rows straight to the
+ * browser, where the import pages render them with RichTextView - i.e.
+ * dangerouslySetInnerHTML. Without this, a Spira instance serving
+ * `<img src=x onerror=...>` executes it in the previewing user's session.
+ *
+ * Applied here rather than deeper in @galm/integrations-spira on purpose: that package is
+ * a transport, and deliberately doesn't depend on @galm/core. This router is the boundary
+ * where remote data becomes something we hand to our own UI, so it's where the data stops
+ * being untrusted.
+ */
+function sanitizeMaybe<T extends string | null | undefined>(html: T): T {
+  return (typeof html === "string" ? sanitizeRichText(html) : html) as T;
+}
+
 export const spiraImportRouter = router({
   getConnection: protectedProcedure.query(async ({ ctx }) => {
     const tenantId = tenantOf(ctx);
@@ -69,7 +90,7 @@ export const spiraImportRouter = router({
     };
   }),
 
-  saveConnection: protectedProcedure
+  saveConnection: orgAdminProcedure
     .input(
       z.object({
         baseUrl: z.string().trim().url(),
@@ -85,7 +106,7 @@ export const spiraImportRouter = router({
       return { ok: true };
     }),
 
-  testConnection: protectedProcedure.mutation(async ({ ctx }) => {
+  testConnection: orgAdminProcedure.mutation(async ({ ctx }) => {
     const tenantId = tenantOf(ctx);
     const client = await requireClient(tenantId);
     try {
@@ -131,7 +152,8 @@ export const spiraImportRouter = router({
       const tenantId = tenantOf(ctx);
       const client = await requireClient(tenantId);
       try {
-        return await previewSpiraImport(client, input.mapping, input.limit);
+        const rows = await previewSpiraImport(client, input.mapping, input.limit);
+        return rows.map((row) => ({ ...row, background: sanitizeMaybe(row.background) }));
       } catch (err) {
         throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "preview failed" });
       }
@@ -201,7 +223,16 @@ export const spiraImportRouter = router({
       const tenantId = tenantOf(ctx);
       const client = await requireClient(tenantId);
       try {
-        return await previewSpiraTestCaseImport(client, input.mapping, input.limit);
+        const rows = await previewSpiraTestCaseImport(client, input.mapping, input.limit);
+        return rows.map((row) => ({
+          ...row,
+          steps: row.steps.map((step) => ({
+            ...step,
+            description: sanitizeMaybe(step.description),
+            expectedResult: sanitizeMaybe(step.expectedResult),
+            purpose: sanitizeMaybe(step.purpose),
+          })),
+        }));
       } catch (err) {
         throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "preview failed" });
       }

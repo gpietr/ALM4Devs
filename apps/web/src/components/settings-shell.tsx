@@ -76,6 +76,16 @@ const NAV_GROUPS: ReadonlyArray<{
     ],
   },
   {
+    label: "Organization",
+    items: [
+      {
+        href: "/settings/members",
+        label: "Members",
+        match: (p) => p === "/settings/members",
+      },
+    ],
+  },
+  {
     label: "Integrations",
     items: [
       {

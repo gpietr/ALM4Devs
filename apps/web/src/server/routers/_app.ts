@@ -1,7 +1,9 @@
 import { protectedProcedure, router } from "../trpc";
+import { adminRouter } from "./admin";
 import { documentTemplatesRouter } from "./document-templates";
 import { llmRouter } from "./llm";
 import { architectureRouter } from "./architecture";
+import { membersRouter } from "./members";
 import { productsRouter } from "./products";
 import { requirementsRouter } from "./requirements";
 import { settingsRouter } from "./settings";
@@ -21,9 +23,11 @@ export const appRouter = router({
       tenantId: user.tenantId ?? null,
     };
   }),
+  admin: adminRouter,
   architecture: architectureRouter,
   documentTemplates: documentTemplatesRouter,
   llm: llmRouter,
+  members: membersRouter,
   products: productsRouter,
   requirements: requirementsRouter,
   settings: settingsRouter,

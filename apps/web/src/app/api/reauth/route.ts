@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { issueReauthToken } from "@/lib/reauth";
+import { requireActiveUser } from "@/server/tenant-access";
 import { schema } from "@galm/db";
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
@@ -14,10 +15,11 @@ import { NextResponse } from "next/server";
  * real session.
  */
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  // Same active-membership gate as the rest of /api (see requireActiveUser): the tokens
+  // this mints are only consumable by protectedProcedure-gated e-sign procedures, so a
+  // removed member could never spend one - but there's no reason to hand them out either.
+  const user = await requireActiveUser(req);
+  if (user instanceof Response) return user;
 
   const body = (await req.json().catch(() => null)) as { password?: string } | null;
   if (!body?.password) {
@@ -27,7 +29,7 @@ export async function POST(req: Request) {
   let verifyResult: { token?: string | null } | undefined;
   try {
     verifyResult = await auth.api.signInEmail({
-      body: { email: session.user.email, password: body.password },
+      body: { email: user.email, password: body.password },
       asResponse: false,
     });
   } catch {
@@ -38,6 +40,6 @@ export async function POST(req: Request) {
     await db.delete(schema.session).where(eq(schema.session.token, verifyResult.token));
   }
 
-  const { token, expiresAt } = issueReauthToken(session.user.id);
+  const { token, expiresAt } = issueReauthToken(user.id);
   return NextResponse.json({ token, expiresAt });
 }

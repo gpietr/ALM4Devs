@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc-client";
+import { useIsOrgAdmin } from "@/lib/use-org-admin";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -21,6 +22,7 @@ import { useEffect, useState } from "react";
  */
 export default function SpiraImportHubPage() {
   const utils = trpc.useUtils();
+  const isOrgAdmin = useIsOrgAdmin();
   const connection = trpc.spiraImport.getConnection.useQuery();
   const saveConnection = trpc.spiraImport.saveConnection.useMutation({
     onSuccess: () => utils.spiraImport.getConnection.invalidate(),
@@ -63,6 +65,12 @@ export default function SpiraImportHubPage() {
           it from your Spira instance&apos;s own REST API documentation page, since it
           differs between Cloud and self-hosted installs.
         </p>
+        {!isOrgAdmin && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Only organization admins can change the Spira connection. Importing still works for
+            everyone using the connection saved here.
+          </p>
+        )}
         <form
           className="mt-3 grid grid-cols-2 gap-3"
           onSubmit={(e) => {
@@ -80,6 +88,7 @@ export default function SpiraImportHubPage() {
             <span className="text-xs font-medium text-muted-foreground">Base URL</span>
             <Input
               required
+              disabled={!isOrgAdmin}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder="https://mycompany.spiraservice.net/Spira/Services/v6_0/RestService.svc"
@@ -87,30 +96,30 @@ export default function SpiraImportHubPage() {
           </Label>
           <Label className="flex-col items-start gap-1">
             <span className="text-xs font-medium text-muted-foreground">API version</span>
-            <Input required value={apiVersion} onChange={(e) => setApiVersion(e.target.value)} />
+            <Input required disabled={!isOrgAdmin} value={apiVersion} onChange={(e) => setApiVersion(e.target.value)} />
           </Label>
           <Label className="flex-col items-start gap-1">
             <span className="text-xs font-medium text-muted-foreground">Project ID (numeric)</span>
-            <Input required type="number" value={projectId} onChange={(e) => setProjectId(e.target.value)} />
+            <Input required type="number" disabled={!isOrgAdmin} value={projectId} onChange={(e) => setProjectId(e.target.value)} />
           </Label>
           <Label className="flex-col items-start gap-1">
             <span className="text-xs font-medium text-muted-foreground">Username</span>
-            <Input required value={username} onChange={(e) => setUsername(e.target.value)} />
+            <Input required disabled={!isOrgAdmin} value={username} onChange={(e) => setUsername(e.target.value)} />
           </Label>
           <Label className="flex-col items-start gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               API key {connection.data?.hasApiKey && "(leave blank to keep the saved one)"}
             </span>
-            <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+            <Input type="password" disabled={!isOrgAdmin} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
           </Label>
           <div className="col-span-2 flex items-center gap-2">
-            <Button type="submit" disabled={saveConnection.isPending}>
+            <Button type="submit" disabled={!isOrgAdmin || saveConnection.isPending}>
               {saveConnection.isPending ? "Saving..." : "Save connection"}
             </Button>
             <Button
               type="button"
               variant="outline"
-              disabled={testConnection.isPending || !connection.data}
+              disabled={!isOrgAdmin || testConnection.isPending || !connection.data}
               onClick={() => testConnection.mutate()}
             >
               {testConnection.isPending ? "Testing..." : "Test connection"}

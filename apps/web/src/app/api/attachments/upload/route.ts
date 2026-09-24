@@ -1,6 +1,6 @@
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { storage } from "@/lib/storage";
+import { requireActiveUser } from "@/server/tenant-access";
 import { registerAttachment } from "@galm/core";
 import { withTenant } from "@galm/db";
 import { randomUUID } from "node:crypto";
@@ -12,14 +12,8 @@ import { NextResponse } from "next/server";
  * omit it for a general rich-text image (referenced only by id from inside the HTML).
  */
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-  const user = session.user as { id: string; tenantId?: string };
-  if (!user.tenantId) {
-    return NextResponse.json({ error: "no tenant" }, { status: 400 });
-  }
+  const user = await requireActiveUser(req);
+  if (user instanceof Response) return user;
 
   const stepExecutionId = new URL(req.url).searchParams.get("stepExecutionId") ?? undefined;
   const contentType = req.headers.get("content-type") ?? "application/octet-stream";
@@ -31,7 +25,7 @@ export async function POST(req: Request) {
 
   const attachment = await withTenant(db, user.tenantId, (tx) =>
     registerAttachment(tx, {
-      tenantId: user.tenantId!,
+      tenantId: user.tenantId,
       storageKey,
       contentType,
       filename,

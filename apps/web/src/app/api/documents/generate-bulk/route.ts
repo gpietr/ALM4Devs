@@ -1,6 +1,6 @@
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateOneDocument } from "@/server/document-generation";
+import { requireActiveUser } from "@/server/tenant-access";
 import { DomainError, getDocumentTemplate, listDocumentTemplateParameters, resolveDocumentTemplateParameterValues } from "@galm/core";
 import { withTenant } from "@galm/db";
 import { zipFiles } from "@galm/documents";
@@ -46,14 +46,8 @@ import { NextResponse } from "next/server";
 const MAX_BULK_TARGETS = 100;
 
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-  const user = session.user as { id: string; tenantId?: string };
-  if (!user.tenantId) {
-    return NextResponse.json({ error: "no tenant" }, { status: 400 });
-  }
+  const user = await requireActiveUser(req);
+  if (user instanceof Response) return user;
   const tenantId = user.tenantId;
 
   let body: {

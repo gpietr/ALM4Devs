@@ -4,7 +4,7 @@ import { withTenant } from "@galm/db";
 import { pingModel, resolveModel } from "@galm/integrations-llm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, router } from "../trpc";
+import { orgAdminProcedure, protectedProcedure, router } from "../trpc";
 
 function tenantOf(ctx: { session: { user: unknown } }): string {
   return (ctx.session.user as { tenantId: string }).tenantId;
@@ -33,7 +33,7 @@ export const llmRouter = router({
     };
   }),
 
-  saveConnection: protectedProcedure
+  saveConnection: orgAdminProcedure
     .input(
       z.object({
         provider: z.enum(["anthropic", "openai", "openai_compatible"]),
@@ -48,7 +48,7 @@ export const llmRouter = router({
       return { ok: true };
     }),
 
-  testConnection: protectedProcedure.mutation(async ({ ctx }) => {
+  testConnection: orgAdminProcedure.mutation(async ({ ctx }) => {
     const tenantId = tenantOf(ctx);
     const connection = await withTenant(db, tenantId, (tx) => getLlmConnection(tx, tenantId));
     if (!connection) {

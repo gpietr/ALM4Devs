@@ -1,6 +1,6 @@
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { storage } from "@/lib/storage";
+import { requireActiveUser } from "@/server/tenant-access";
 import { getAttachment } from "@galm/core";
 import { withTenant } from "@galm/db";
 import { NextResponse } from "next/server";
@@ -13,14 +13,9 @@ import { NextResponse } from "next/server";
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-  const tenantId = (session.user as { tenantId?: string }).tenantId;
-  if (!tenantId) {
-    return NextResponse.json({ error: "no tenant" }, { status: 400 });
-  }
+  const user = await requireActiveUser(req);
+  if (user instanceof Response) return user;
+  const { tenantId } = user;
 
   const attachment = await withTenant(db, tenantId, (tx) => getAttachment(tx, tenantId, id)).catch((err) => {
     // Logged rather than silently swallowed: a blind catch-to-null here once masked a
@@ -35,6 +30,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const signedUrl = await storage.getSignedUrl(attachment.storageKey, { expiresInSeconds: 300 });
+  // Pass the registered content type into the signed token so the file route can serve it
+  // with an explicit Content-Type instead of letting the browser sniff - see that route's
+  // INLINE_SAFE_TYPES for which types are allowed to render in this origin at all.
+  const signedUrl = await storage.getSignedUrl(attachment.storageKey, {
+    expiresInSeconds: 300,
+    contentType: attachment.contentType,
+  });
   return NextResponse.redirect(new URL(signedUrl, req.url));
 }

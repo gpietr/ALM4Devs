@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc-client";
+import { useIsOrgAdmin } from "@/lib/use-org-admin";
 import { useEffect, useState } from "react";
 
 type Provider = "anthropic" | "openai" | "openai_compatible";
@@ -21,6 +22,7 @@ type Provider = "anthropic" | "openai" | "openai_compatible";
  */
 export default function AiSettingsPage() {
   const utils = trpc.useUtils();
+  const isOrgAdmin = useIsOrgAdmin();
   const connection = trpc.llm.getConnection.useQuery();
   const saveConnection = trpc.llm.saveConnection.useMutation({
     onSuccess: () => utils.llm.getConnection.invalidate(),
@@ -58,6 +60,12 @@ export default function AiSettingsPage() {
 
       <Card className="max-w-2xl p-4">
           <h2 className="text-sm font-medium text-foreground">Connection</h2>
+          {!isOrgAdmin && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Only organization admins can change the AI connection. Ask one of your admins if this
+              needs updating.
+            </p>
+          )}
           <form
             className="mt-3 grid grid-cols-2 gap-3"
             onSubmit={(e) => {
@@ -72,7 +80,7 @@ export default function AiSettingsPage() {
           >
             <Label className="flex-col items-start gap-1">
               <span className="text-xs font-medium text-muted-foreground">Provider</span>
-              <Select value={provider} onValueChange={(v) => setProvider(v as Provider)}>
+              <Select value={provider} onValueChange={(v) => setProvider(v as Provider)} disabled={!isOrgAdmin}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -87,6 +95,7 @@ export default function AiSettingsPage() {
               <span className="text-xs font-medium text-muted-foreground">Model</span>
               <Input
                 required
+                disabled={!isOrgAdmin}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 placeholder={provider === "anthropic" ? "claude-sonnet-5" : provider === "openai" ? "gpt-5" : "llama-3.3-70b"}
@@ -97,6 +106,7 @@ export default function AiSettingsPage() {
                 <span className="text-xs font-medium text-muted-foreground">Base URL</span>
                 <Input
                   required
+                  disabled={!isOrgAdmin}
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="https://your-endpoint.example.com/v1"
@@ -107,16 +117,16 @@ export default function AiSettingsPage() {
               <span className="text-xs font-medium text-muted-foreground">
                 API key {connection.data?.hasApiKey && "(leave blank to keep the saved one)"}
               </span>
-              <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <Input type="password" disabled={!isOrgAdmin} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
             </Label>
             <div className="col-span-2 flex items-center gap-2">
-              <Button type="submit" disabled={saveConnection.isPending}>
+              <Button type="submit" disabled={!isOrgAdmin || saveConnection.isPending}>
                 {saveConnection.isPending ? "Saving..." : "Save connection"}
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                disabled={testConnection.isPending || !connection.data}
+                disabled={!isOrgAdmin || testConnection.isPending || !connection.data}
                 onClick={() => testConnection.mutate()}
               >
                 {testConnection.isPending ? "Testing..." : "Test connection"}

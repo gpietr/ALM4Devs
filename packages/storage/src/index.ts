@@ -7,9 +7,10 @@
  */
 export interface StorageDriver {
   putObject(key: string, data: Uint8Array | ArrayBuffer, contentType?: string): Promise<void>;
-  getSignedUrl(key: string, opts?: { expiresInSeconds?: number }): Promise<string>;
+  getSignedUrl(key: string, opts?: { expiresInSeconds?: number; contentType?: string | null }): Promise<string>;
   deleteObject(key: string): Promise<void>;
 }
 
 export { LocalFsStorageDriver } from "./local";
 export { verifySignedToken } from "./local";
+export type { SignedObject } from "./local";
