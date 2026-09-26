@@ -13,6 +13,7 @@
     "@galm/core": "workspace:*",
     "@galm/db": "workspace:*",
     "@galm/documents": "workspace:*",
+    "@galm/integrations-github": "workspace:*",
     "@galm/integrations-llm": "workspace:*",
     "@galm/integrations-nvd": "workspace:*",
     "@galm/integrations-spira": "workspace:*",

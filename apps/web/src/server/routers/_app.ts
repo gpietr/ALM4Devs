@@ -1,6 +1,7 @@
 import { protectedProcedure, router } from "../trpc";
 import { adminRouter } from "./admin";
 import { documentTemplatesRouter } from "./document-templates";
+import { githubRouter } from "./github";
 import { llmRouter } from "./llm";
 import { architectureRouter } from "./architecture";
 import { membersRouter } from "./members";
@@ -27,6 +28,7 @@ export const appRouter = router({
   admin: adminRouter,
   architecture: architectureRouter,
   documentTemplates: documentTemplatesRouter,
+  github: githubRouter,
   llm: llmRouter,
   members: membersRouter,
   ots: otsRouter,

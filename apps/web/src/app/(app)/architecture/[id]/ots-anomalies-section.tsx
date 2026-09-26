@@ -12,8 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc-client";
+import { parseGithubIssuesUrl } from "@galm/integrations-github";
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { OtsGithubImportDialog } from "./ots-github-import-dialog";
 
 // Standalone copy - @galm/core's barrel pulls in the database layer.
 const OUTCOMES = [
@@ -68,7 +70,8 @@ const EMPTY_DRAFT: Draft = {
   requirementIds: [],
 };
 
-/** Known issues (vendor bugs), entered by hand - unlike CVEs, which come from NVD. */
+/** Known issues (vendor bugs), entered by hand or imported from a GitHub issue list -
+ * unlike CVEs, which come from NVD. */
 export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; productId: string }) {
   const utils = trpc.useUtils();
   const doc = trpc.ots.documentation.useQuery({ nodeId });
@@ -81,6 +84,7 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
 
   const [editing, setEditing] = useState<{ id: string | null } | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [importing, setImporting] = useState(false);
 
   if (doc.error) return <p className="p-6 text-sm text-destructive">{doc.error.message}</p>;
   if (!doc.data) return <p className="p-6 text-sm text-muted-foreground">Loading...</p>;
@@ -170,6 +174,11 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
           <Button type="button" size="sm" variant="outline" disabled={markReviewed.isPending} onClick={() => markReviewed.mutate({ nodeId })}>
             {markReviewed.isPending ? "Saving…" : "Mark list reviewed"}
           </Button>
+          {profile.anomalyListUrl && parseGithubIssuesUrl(profile.anomalyListUrl) && (
+            <Button type="button" size="sm" variant="outline" onClick={() => setImporting(true)}>
+              Import from GitHub
+            </Button>
+          )}
           <Button type="button" size="sm" onClick={openCreate}>
             Add issue
           </Button>
@@ -246,6 +255,16 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
           </Table>
         )}
       </Frame>
+
+      {importing && (
+        <OtsGithubImportDialog
+          nodeId={nodeId}
+          initialUrl={profile.anomalyListUrl ?? ""}
+          open
+          onOpenChange={setImporting}
+          onImported={invalidate}
+        />
+      )}
 
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">

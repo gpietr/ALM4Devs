@@ -218,6 +218,13 @@
       "when": 1790274486520,
       "tag": "0031_ots_documentation",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790410722585,
+      "tag": "0032_github_connections",
+      "breakpoints": true
     }
   ]
 }

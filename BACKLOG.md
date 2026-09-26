@@ -1634,6 +1634,31 @@ add its own coverage there rather than relying on manual `curl`/browser verifica
   **Verified**: typecheck clean; new unit tests (`ots.test.ts`) and e2e tests ("e2e: OTS
   documentation"); full suite passes.
 
+- [x] **9.51. Import OTS known issues from GitHub** — for OTS hosted on GitHub, the
+  "vendor's known-bug list" URL can be a filtered issues page, and its matches can be
+  imported as Known issues.
+
+  **Decisions.**
+  - The issues page's `q` goes to GitHub's issue search API unchanged; only the scope is
+    pinned (`repo:owner/name is:issue`), so a pasted query can't reach other repos or PRs.
+    Legacy `?labels=&state=` links are converted.
+  - Preview and pick, not bulk import: the newest 200 matches are listed and the user ticks
+    which to import. Ones already present are shown as imported.
+  - Dedupe key is `external_id` = `owner/repo#number`, so re-imports skip existing issues.
+  - Imported issues start unassessed. A closed issue's milestone fills "fixed in".
+  - Optional per-tenant token (`github_connections`, same trust boundary as the NVD key).
+    Anonymous search works for public repos; a token raises limits and allows private ones.
+  - Out of scope: periodic sync or state refresh, other trackers, importing comments.
+
+  **Surface.**
+  - `packages/integrations/github` (URL parser, client, `ALLOW_MOCK_GITHUB_PROVIDER` mock).
+  - `importOtsAnomalies` in `packages/core/src/ots.ts`; `ots.previewGithubIssues` /
+    `ots.importGithubIssues`; the `github.*` router and Settings → GitHub connection.
+  - "Import from GitHub" on the Known issues tab, shown when the list URL is a GitHub one.
+
+  **Verified**: typecheck clean; URL-parser unit tests; e2e tests for import, dedupe and
+  rejection of foreign repos; full suite passes; live anonymous search smoke-tested.
+
 - [ ] **10. Self-host packaging** — finalize `docker-compose.yml` for external users (env
   templating, first-run setup docs), confirm the three-service topology holds up outside the
   dev environment.

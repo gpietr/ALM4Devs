@@ -703,6 +703,58 @@ export async function deleteOtsAnomaly(db: TenantTx, params: { tenantId: string;
   });
 }
 
+export async function listOtsAnomalyExternalIds(db: TenantTx, tenantId: string, architectureNodeId: string) {
+  const rows = await db
+    .select({ externalId: schema.otsAnomalies.externalId })
+    .from(schema.otsAnomalies)
+    .where(and(eq(schema.otsAnomalies.tenantId, tenantId), eq(schema.otsAnomalies.architectureNodeId, architectureNodeId)));
+  return new Set(rows.flatMap((r) => (r.externalId ? [r.externalId] : [])));
+}
+
+/** Bulk-creates known issues, skipping external ids the OTS item already has. */
+export async function importOtsAnomalies(
+  db: TenantTx,
+  params: {
+    tenantId: string;
+    architectureNodeId: string;
+    items: (OtsAnomalyInput & { externalId: string })[];
+    source: string;
+    actorUserId: string;
+  },
+) {
+  const node = await getOtsNode(db, params.tenantId, params.architectureNodeId);
+  const seen = await listOtsAnomalyExternalIds(db, params.tenantId, node.id);
+  const toInsert = [];
+  for (const item of params.items) {
+    if (seen.has(item.externalId)) continue;
+    seen.add(item.externalId);
+    toInsert.push({
+      ...(await prepareAnomaly(db, params.tenantId, node, item)),
+      tenantId: params.tenantId,
+      architectureNodeId: node.id,
+      createdBy: params.actorUserId,
+      updatedBy: params.actorUserId,
+    });
+  }
+  if (toInsert.length > 0) {
+    await db.insert(schema.otsAnomalies).values(toInsert);
+    await writeAuditLog(db, {
+      tenantId: params.tenantId,
+      actorUserId: params.actorUserId,
+      action: "ots.anomalies_imported",
+      entityType: "architecture_node",
+      entityId: node.id,
+      payload: {
+        displayId: node.displayId,
+        source: params.source,
+        count: toInsert.length,
+        externalIds: toInsert.map((v) => v.externalId),
+      },
+    });
+  }
+  return { imported: toInsert.length, skipped: params.items.length - toInsert.length };
+}
+
 /** Attests the known-issue list is current. A separate action from the profile save, so
  * the timestamp means a review actually happened. */
 export async function markOtsAnomaliesReviewed(

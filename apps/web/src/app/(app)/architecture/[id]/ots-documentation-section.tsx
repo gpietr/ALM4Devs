@@ -116,7 +116,12 @@ const GROUPS: Group[] = [
     title: "How do you know it works?",
     hint: "Testing evidence is the linked test cases (Details tab) and each version's assessment. The current list of known OTS bugs is the Known issues tab; record here where the vendor publishes them and where updates come from.",
     fields: [
-      { key: "anomalyListUrl", label: "Vendor's known-bug list", short: true, placeholder: "https://…" },
+      {
+        key: "anomalyListUrl",
+        label: "Vendor's known-bug list",
+        short: true,
+        placeholder: "https://… (a GitHub issues URL, filters included, enables import)",
+      },
       { key: "updatesSourceUrl", label: "Where updates are obtained", short: true, placeholder: "https://…" },
     ],
   },

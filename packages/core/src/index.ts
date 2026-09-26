@@ -7,6 +7,7 @@ export * from "./document-context";
 export * from "./document-templates";
 export * from "./errors";
 export * from "./external-links";
+export * from "./github-connection";
 export * from "./item-id";
 export * from "./level-sequences";
 export * from "./levels";

@@ -1255,6 +1255,15 @@ export const nvdConnections = pgTable("nvd_connections", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Optional token for importing OTS known issues from GitHub; same trust boundary as nvdConnections.
+export const githubConnections = pgTable("github_connections", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  token: text("token"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // One row per user-triggered scan attempt of one OTS architecture node. This is an
 // operational read-model (cheap "last scanned"/"did it fail" lookups for the OTS view),
 // not the audit trail - a successful scan also gets a `writeAuditLog` entry

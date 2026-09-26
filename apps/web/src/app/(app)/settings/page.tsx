@@ -85,6 +85,11 @@ const SECTIONS: ReadonlyArray<{
         description: "One-time import of requirements and test cases from Spira.",
       },
       {
+        href: "/settings/github",
+        title: "GitHub connection",
+        description: "Optional token for importing OTS known issues from GitHub.",
+      },
+      {
         href: "/settings/nvd",
         title: "NVD connection",
         description: "Optional API key to speed up OTS vulnerability scans.",

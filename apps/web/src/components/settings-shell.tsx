@@ -99,6 +99,11 @@ const NAV_GROUPS: ReadonlyArray<{
         match: (p) => p.startsWith("/settings/import"),
       },
       {
+        href: "/settings/github",
+        label: "GitHub connection",
+        match: (p) => p === "/settings/github",
+      },
+      {
         href: "/settings/nvd",
         label: "NVD connection",
         match: (p) => p === "/settings/nvd",

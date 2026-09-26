@@ -17,6 +17,7 @@
         "@galm/core": "workspace:*",
         "@galm/db": "workspace:*",
         "@galm/documents": "workspace:*",
+        "@galm/integrations-github": "workspace:*",
         "@galm/integrations-llm": "workspace:*",
         "@galm/integrations-nvd": "workspace:*",
         "@galm/integrations-spira": "workspace:*",
@@ -120,6 +121,10 @@
       "devDependencies": {
         "@types/nodemailer": "^6.4.17",
       },
+    },
+    "packages/integrations/github": {
+      "name": "@galm/integrations-github",
+      "version": "0.0.1",
     },
     "packages/integrations/llm": {
       "name": "@galm/integrations-llm",
@@ -363,6 +368,8 @@
     "@galm/documents": ["@galm/documents@workspace:packages/documents"],
 
     "@galm/email": ["@galm/email@workspace:packages/email"],
+
+    "@galm/integrations-github": ["@galm/integrations-github@workspace:packages/integrations/github"],
 
     "@galm/integrations-llm": ["@galm/integrations-llm@workspace:packages/integrations/llm"],
 

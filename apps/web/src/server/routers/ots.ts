@@ -5,6 +5,8 @@ import {
   getOtsDocumentation,
   getOtsRegister,
   getOtsReleaseChanges,
+  importOtsAnomalies,
+  listOtsAnomalyExternalIds,
   markOtsAnomaliesReviewed,
   OTS_ANOMALY_OUTCOMES,
   OTS_CATEGORIES,
@@ -18,9 +20,11 @@ import {
   upsertOtsVersionAssessment,
 } from "@galm/core";
 import { withTenant } from "@galm/db";
+import { GithubApiError, githubIssueExternalId, parseGithubIssuesUrl } from "@galm/integrations-github";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
+import { buildGithubClient } from "./github";
 
 function tenantOf(ctx: { session: { user: unknown } }): string {
   return (ctx.session.user as { tenantId: string }).tenantId;
@@ -65,6 +69,16 @@ const anomalySchema = z.object({
   affectedVersionIds: z.array(z.string().uuid()).optional(),
   requirementIds: z.array(z.string().uuid()).optional(),
 });
+
+const GITHUB_PREVIEW_LIMIT = 200;
+
+function parseIssuesUrlOrThrow(url: string) {
+  const parsed = parseGithubIssuesUrl(url);
+  if (!parsed) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "not a GitHub issues URL (expected github.com/owner/repo/issues…)" });
+  }
+  return parsed;
+}
 
 /** OTS documentation (packages/core/src/ots.ts). Identity - title, supplier, recording
  * versions - stays on the architecture/vulnerabilities routers. */
@@ -206,6 +220,76 @@ export const otsRouter = router({
     ).catch(toBadRequest);
     return { ok: true };
   }),
+
+  /** Fetches the issues a GitHub issues URL lists, marking ones this item already has. */
+  previewGithubIssues: protectedProcedure
+    .input(z.object({ nodeId: z.string().uuid(), url: z.string().trim().min(1).max(2000) }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      const parsed = parseIssuesUrlOrThrow(input.url);
+      const client = await buildGithubClient(tenantId);
+      const result = await client.searchIssues(parsed, { limit: GITHUB_PREVIEW_LIMIT }).catch((err) => {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof GithubApiError ? err.message : "GitHub request failed" });
+      });
+      const existing = await withTenant(db, tenantId, (tx) => listOtsAnomalyExternalIds(tx, tenantId, input.nodeId));
+      return {
+        query: parsed.query,
+        totalCount: result.totalCount,
+        truncated: result.truncated,
+        issues: result.items.map((issue) => {
+          const externalId = githubIssueExternalId(parsed, issue.number);
+          return { ...issue, externalId, alreadyImported: existing.has(externalId) };
+        }),
+      };
+    }),
+
+  /** Imports previewed issues; ones already present are skipped. */
+  importGithubIssues: protectedProcedure
+    .input(
+      z.object({
+        nodeId: z.string().uuid(),
+        url: z.string().trim().min(1).max(2000),
+        issues: z
+          .array(
+            z.object({
+              number: z.number().int().positive(),
+              title: z.string().trim().min(1).max(500),
+              body: z.string(),
+              htmlUrl: z.string().url().max(2000),
+              state: z.enum(["open", "closed"]),
+              milestone: z.string().max(200).nullable(),
+            }),
+          )
+          .min(1)
+          .max(GITHUB_PREVIEW_LIMIT),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = tenantOf(ctx);
+      const userId = userIdOf(ctx);
+      const parsed = parseIssuesUrlOrThrow(input.url);
+      const repo = `${parsed.owner}/${parsed.repo}`;
+      const repoPrefix = `https://github.com/${repo}/issues/`.toLowerCase();
+      if (input.issues.some((i) => !i.htmlUrl.toLowerCase().startsWith(repoPrefix))) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `issues must belong to ${repo}` });
+      }
+      return withTenant(db, tenantId, (tx) =>
+        importOtsAnomalies(tx, {
+          tenantId,
+          architectureNodeId: input.nodeId,
+          source: input.url,
+          actorUserId: userId,
+          items: input.issues.map((issue) => ({
+            externalId: githubIssueExternalId(parsed, issue.number),
+            title: issue.title,
+            description: issue.body.slice(0, 20000),
+            sourceUrl: issue.htmlUrl,
+            discoveryMethod: "Vendor issue tracker (GitHub)",
+            resolvedInVersion: issue.state === "closed" ? issue.milestone : null,
+          })),
+        }),
+      ).catch(toBadRequest);
+    }),
 
   /** Product-wide OTS register - every OTS item across all architecture levels. */
   register: protectedProcedure.input(z.object({ productId: z.string().uuid() })).query(async ({ ctx, input }) => {

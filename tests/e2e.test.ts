@@ -5308,4 +5308,94 @@ describe("e2e: OTS documentation (FDA OTS guidance)", () => {
     await appSql.close();
     expect(counts).toEqual([0, 0]);
   });
+
+  // Sentinel token for createGithubClient's mock (needs ALLOW_MOCK_GITHUB_PROVIDER=1).
+  async function saveMockGithubConnection(tenant: TestTenant) {
+    const res = await rpc(tenant.cookie, "POST", "github.saveConnection", { token: "mock-github-token" });
+    expect(res.ok).toBe(true);
+    expect((await rpc(tenant.cookie, "GET", "github.getConnection")).data).toEqual({ hasToken: true });
+  }
+
+  test("GitHub issues import as unassessed known issues; re-imports skip what's already there", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockGithubConnection(tenant);
+    const ctx = await setupOtsProduct(tenant);
+    const nodeId = await createOts(tenant, ctx, "SQLite", "3.45.0");
+    const url = "https://github.com/acme/widget/issues?q=is:issue+is:open+label:bug";
+
+    const preview = await rpc(tenant.cookie, "POST", "ots.previewGithubIssues", { nodeId, url });
+    expect(preview.ok).toBe(true);
+    expect(preview.data.query).toBe("repo:acme/widget is:issue is:open label:bug");
+    expect(preview.data.issues.map((i: any) => [i.externalId, i.alreadyImported])).toEqual([
+      ["acme/widget#102", false],
+      ["acme/widget#101", false],
+    ]);
+
+    const pick = (i: any) => ({
+      number: i.number,
+      title: i.title,
+      body: i.body,
+      htmlUrl: i.htmlUrl,
+      state: i.state,
+      milestone: i.milestone,
+    });
+    const imported = await rpc(tenant.cookie, "POST", "ots.importGithubIssues", {
+      nodeId,
+      url,
+      issues: preview.data.issues.map(pick),
+    });
+    expect(imported.ok).toBe(true);
+    expect(imported.data).toEqual({ imported: 2, skipped: 0 });
+
+    const doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
+    const byId = Object.fromEntries(doc.data.anomalies.map((a: any) => [a.externalId, a]));
+    expect(byId["acme/widget#101"]).toMatchObject({
+      title: "Wrong result for empty input",
+      sourceUrl: "https://github.com/acme/widget/issues/101",
+      discoveryMethod: "Vendor issue tracker (GitHub)",
+      resolvedInVersion: "2.4.1", // closed, so its milestone
+      outcome: null,
+    });
+    expect(byId["acme/widget#102"].resolvedInVersion).toBeNull(); // still open
+
+    const again = await rpc(tenant.cookie, "POST", "ots.previewGithubIssues", { nodeId, url });
+    expect(again.data.issues.every((i: any) => i.alreadyImported)).toBe(true);
+    const reimport = await rpc(tenant.cookie, "POST", "ots.importGithubIssues", {
+      nodeId,
+      url,
+      issues: again.data.issues.map(pick),
+    });
+    expect(reimport.data).toEqual({ imported: 0, skipped: 2 });
+    expect((await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId })).data.anomalies).toHaveLength(2);
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const audits = await sql`select payload from audit_log where entity_id = ${nodeId} and action = 'ots.anomalies_imported'`;
+    await sql.close();
+    expect(audits).toHaveLength(1);
+    expect(JSON.parse(audits[0].payload).count).toBe(2); // jsonb comes back as a string here
+  });
+
+  test("GitHub import rejects non-GitHub URLs and issues from another repository", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    await saveMockGithubConnection(tenant);
+    const ctx = await setupOtsProduct(tenant);
+    const nodeId = await createOts(tenant, ctx, "Widget", "1.0");
+
+    const notGithub = await rpc(tenant.cookie, "POST", "ots.previewGithubIssues", {
+      nodeId,
+      url: "https://gitlab.com/acme/widget/issues",
+    });
+    expect(notGithub.ok).toBe(false);
+    expect(notGithub.error?.message).toMatch(/not a GitHub issues URL/);
+
+    const otherRepo = await rpc(tenant.cookie, "POST", "ots.importGithubIssues", {
+      nodeId,
+      url: "https://github.com/acme/widget/issues",
+      issues: [
+        { number: 1, title: "x", body: "", htmlUrl: "https://github.com/evil/repo/issues/1", state: "open", milestone: null },
+      ],
+    });
+    expect(otherRepo.ok).toBe(false);
+    expect(otherRepo.error?.message).toMatch(/must belong to acme\/widget/);
+  });
 });
