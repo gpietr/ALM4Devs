@@ -104,7 +104,6 @@ export function OtsVersionControls({
       {setStatus.error && <p className="text-sm text-destructive">{setStatus.error.message}</p>}
 
       {draft && (
-        // A div, not a <form> - this sits inside the detail page's own <form>.
         <div className="space-y-2.5 border border-border bg-background p-3">
           <p className="text-[11.5px] text-muted-foreground">
             Change-impact assessment

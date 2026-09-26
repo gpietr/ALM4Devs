@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 /**
- * The home page's dynamic half - the product/artifact/level a returning user was last
+ * The home page's dynamic half - the product/menu entry/level a returning user was last
  * looking at is per-device (localStorage, see last-location.ts), so this has to be a
  * client component; the rest of the page stays a server component (see page.tsx) rather
  * than paying for a fully client-rendered page just for this.

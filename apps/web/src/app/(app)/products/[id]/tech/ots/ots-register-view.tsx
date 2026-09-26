@@ -10,7 +10,7 @@ import { Download } from "lucide-react";
 import Link from "next/link";
 
 // Standalone copy - @galm/core's barrel pulls in the database layer.
-const CATEGORY_LABEL: Record<string, string> = {
+export const CATEGORY_LABEL: Record<string, string> = {
   operating_system: "Operating system",
   driver: "Driver",
   utility: "Utility",
@@ -28,9 +28,16 @@ function isoDate(value: string | Date | null): string {
   return value ? new Date(value).toISOString().slice(0, 10) : "";
 }
 
-/** Every OTS item across all architecture levels, with CSV and `ots_list` PDF exports. The
- * per-level "OTS" view stays the vulnerability-scanning workspace. */
-export function OtsRegisterView({ productId, productName }: { productId: string; productName: string }) {
+/** Every OTS item across all architecture levels, with CSV and `ots_list` PDF exports. */
+export function OtsRegisterView({
+  productId,
+  productName,
+  itemHref,
+}: {
+  productId: string;
+  productName: string;
+  itemHref: (nodeId: string) => string;
+}) {
   const register = trpc.ots.register.useQuery({ productId });
   const rows = register.data ?? [];
 
@@ -85,7 +92,7 @@ export function OtsRegisterView({ productId, productName }: { productId: string;
   }
 
   return (
-    <div className="mt-4">
+    <div>
       <div className="mb-3 flex items-start justify-between gap-3">
         <p className="max-w-2xl text-[12.5px] text-muted-foreground">
           Every OTS item in this product, across all architecture levels. Open an item&rsquo;s Documentation tab to fill in
@@ -127,7 +134,7 @@ export function OtsRegisterView({ productId, productName }: { productId: string;
                   return (
                     <TableRow key={r.node.id}>
                       <TableCell>
-                        <Link href={`/architecture/${r.node.id}?tab=documentation`} className="hover:underline">
+                        <Link href={itemHref(r.node.id)} className="hover:underline">
                           <span className="mr-1.5 font-mono text-[11.5px] text-muted-foreground">{r.node.displayId}</span>
                           {r.node.title}
                         </Link>

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc-client";
+import { useUrlState } from "@/lib/use-url-state";
 import { parseGithubIssuesUrl } from "@galm/integrations-github";
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -85,6 +86,7 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
   const [editing, setEditing] = useState<{ id: string | null } | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [importing, setImporting] = useState(false);
+  const { setParams } = useUrlState();
 
   if (doc.error) return <p className="p-6 text-sm text-destructive">{doc.error.message}</p>;
   if (!doc.data) return <p className="p-6 text-sm text-muted-foreground">Loading...</p>;
@@ -94,6 +96,7 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
   const update = (patch: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...patch }));
   const needsRationale = draft.outcome !== NOT_ASSESSED;
   const saveMutation = editing?.id ? updateAnomaly : createAnomaly;
+  const canImport = !!profile.anomalyListUrl && !!parseGithubIssuesUrl(profile.anomalyListUrl);
 
   function openCreate() {
     setDraft(EMPTY_DRAFT);
@@ -147,7 +150,7 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-5 pb-24">
+    <div className="space-y-4 pb-24">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="max-w-2xl">
           <p className="text-[12.5px] text-muted-foreground">
@@ -169,12 +172,28 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
               ? `List last reviewed ${new Date(profile.anomaliesReviewedAt).toLocaleDateString()}${anomaliesReviewedByName ? ` by ${anomaliesReviewedByName}` : ""}.`
               : "List never marked as reviewed."}
           </p>
+          {!canImport && (
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              {profile.anomalyListUrl
+                ? "The vendor list isn't a GitHub issues page, so its issues can't be fetched automatically. "
+                : "To fetch issues from GitHub automatically, "}
+              set the{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() => setParams({ tab: "documentation" })}
+              >
+                vendor&rsquo;s known-bug list
+              </button>{" "}
+              in Documentation to the project&rsquo;s GitHub issues URL.
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           <Button type="button" size="sm" variant="outline" disabled={markReviewed.isPending} onClick={() => markReviewed.mutate({ nodeId })}>
             {markReviewed.isPending ? "Saving…" : "Mark list reviewed"}
           </Button>
-          {profile.anomalyListUrl && parseGithubIssuesUrl(profile.anomalyListUrl) && (
+          {canImport && (
             <Button type="button" size="sm" variant="outline" onClick={() => setImporting(true)}>
               Import from GitHub
             </Button>
@@ -204,7 +223,7 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
             <TableBody>
               {anomalies.map((a) => (
                 <TableRow key={a.id}>
-                  <TableCell className="max-w-[360px]">
+                  <TableCell className="whitespace-normal [overflow-wrap:anywhere]">
                     <div className="text-[13px]">
                       {a.externalId && <span className="mr-1.5 font-mono text-[11.5px] text-muted-foreground">{a.externalId}</span>}
                       {a.sourceUrl ? (
@@ -217,7 +236,7 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
                     </div>
                     {a.impactEvaluation && <p className="mt-0.5 line-clamp-2 text-[12px] text-muted-foreground">{a.impactEvaluation}</p>}
                   </TableCell>
-                  <TableCell className="text-[12.5px] text-muted-foreground">
+                  <TableCell className="text-[12.5px] whitespace-normal text-muted-foreground">
                     {a.affectedVersionIds.length > 0 ? a.affectedVersionIds.map((id) => versionLabel.get(id)).join(", ") : "All"}
                     {a.resolvedInVersion && <div>fixed in {a.resolvedInVersion}</div>}
                   </TableCell>
@@ -228,7 +247,7 @@ export function OtsAnomaliesSection({ nodeId, productId }: { nodeId: string; pro
                       <Badge variant="destructive">Not assessed</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-[12px] text-muted-foreground">
+                  <TableCell className="text-[12px] whitespace-normal text-muted-foreground">
                     {a.requirements.length > 0 ? a.requirements.map((r) => r.displayId).join(", ") : "—"}
                   </TableCell>
                   <TableCell>

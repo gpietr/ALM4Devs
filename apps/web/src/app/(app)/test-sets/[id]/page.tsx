@@ -31,6 +31,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { entryHref } from "@/lib/product-nav";
 import { formatItemId } from "@/lib/format-item-id";
 import { trpc } from "@/lib/trpc-client";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -170,11 +171,11 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <ProductContextStrip productId={set.productId} artifact="testSets" activeLevelId={null} />
+      <ProductContextStrip productId={set.productId} entry="testSets" activeLevelId={null} />
 
       <div className="flex items-center justify-between border-b border-border bg-card px-5 py-[9px]">
         <span className="font-mono text-xs text-muted-foreground">
-          <Link href={`/products/${set.productId}?artifact=testSets`} className="hover:text-foreground">
+          <Link href={entryHref(set.productId, "testSets")} className="hover:text-foreground">
             Test sets
           </Link>{" "}
           <span className="opacity-50">/</span> <span className="font-medium text-foreground">{set.name}</span>
@@ -186,7 +187,7 @@ export default function TestSetDetailPage({ params }: { params: Promise<{ id: st
           disabled={deleteTestSet.isPending}
           onClick={() => {
             if (!confirm(`Delete test set "${set.name}"? This cannot be undone.`)) return;
-            deleteTestSet.mutate({ id }, { onSuccess: () => router.push(`/products/${set.productId}?artifact=testSets`) });
+            deleteTestSet.mutate({ id }, { onSuccess: () => router.push(entryHref(set.productId, "testSets")) });
           }}
         >
           {deleteTestSet.isPending ? "Deleting..." : "Delete"}

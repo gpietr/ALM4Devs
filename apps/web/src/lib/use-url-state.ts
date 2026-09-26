@@ -7,7 +7,7 @@ import { useCallback } from "react";
  * Reads/writes a page's filter and sort state as URL query params, so a filtered/sorted
  * view is a real, shareable link rather than local-only component state. `setParams`
  * merges into whatever's already in the URL (never clobbers unrelated params like
- * `artifact`/`level`) and replaces history rather than pushing, so tweaking a filter
+ * `level`/`tab`) and replaces history rather than pushing, so tweaking a filter
  * doesn't spam the back button with one entry per keystroke/click. Setting a key to
  * `undefined` or `""` removes it entirely, so a link at its default filter/sort state
  * stays clean instead of accumulating `?status=&safety=&sortBy=` noise.

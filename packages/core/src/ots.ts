@@ -120,6 +120,7 @@ export interface OtsNodeRef {
   title: string;
   supplier: string | null;
   sequenceNumber: number;
+  levelId: string;
   levelCode: string;
   displayId: string;
   currentVersionId: string | null;
@@ -140,6 +141,7 @@ async function loadOtsNodes(
       supplier: schema.architectureNodes.supplier,
       sequenceNumber: schema.architectureNodes.sequenceNumber,
       currentVersionId: schema.architectureNodes.currentVersionId,
+      levelId: schema.architectureNodes.levelId,
       levelCode: schema.levels.code,
     })
     .from(schema.architectureNodes)

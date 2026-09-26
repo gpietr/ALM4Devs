@@ -38,7 +38,7 @@ export default function NewTestCasePage({ params }: { params: Promise<{ id: stri
 
   return (
     <>
-      <ProductContextStrip productId={productId} artifact="testCases" activeLevelId={levelId || null} />
+      <ProductContextStrip productId={productId} entry="testCases" activeLevelId={levelId || null} />
 
       <div className="flex items-stretch">
         <form

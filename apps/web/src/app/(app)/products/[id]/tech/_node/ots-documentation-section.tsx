@@ -1,7 +1,6 @@
 "use client";
 
 import { ArchitecturePicker } from "@/components/architecture-picker";
-import { GenerateDocumentButton } from "@/components/generate-document-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -256,7 +255,7 @@ export function OtsDocumentationSection({
   const enhancedGaps = completeness.gaps.filter((g) => g.enhancedOnly);
 
   return (
-    <div className="mx-auto grid max-w-6xl gap-6 p-5 pb-24 lg:grid-cols-[1fr_300px]">
+    <div className="grid gap-6 pb-24 lg:grid-cols-[1fr_300px]">
       <form
         className="min-w-0 space-y-6"
         onSubmit={(e) => {
@@ -398,7 +397,6 @@ export function OtsDocumentationSection({
             </div>
           )}
         </div>
-        <GenerateDocumentButton scope="ots_component" buildRequestBody={() => ({ architectureNodeId: nodeId })} />
       </aside>
     </div>
   );

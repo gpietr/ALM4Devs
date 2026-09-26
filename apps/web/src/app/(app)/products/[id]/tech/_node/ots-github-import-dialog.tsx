@@ -115,7 +115,7 @@ export function OtsGithubImportDialog({
                             onCheckedChange={(checked) => toggle(issue.number, !!checked)}
                           />
                         </TableCell>
-                        <TableCell className="max-w-[520px]">
+                        <TableCell className="whitespace-normal [overflow-wrap:anywhere]">
                           <div className="text-[13px]">
                             <span className="mr-1.5 font-mono text-[11.5px] text-muted-foreground">#{issue.number}</span>
                             <a href={issue.htmlUrl} target="_blank" rel="noreferrer" className="hover:underline">

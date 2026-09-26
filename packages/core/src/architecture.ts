@@ -374,6 +374,13 @@ export async function getArchitectureNode(db: TenantTx, tenantId: string, id: st
   blocked.add(row.id);
 
   const parent = row.parentId ? rows.find((r) => r.id === row.parentId) ?? null : null;
+  // Root-first ancestors for the item header's path (`rows` already holds the level).
+  const ancestors: typeof rows = [];
+  for (let cur = parent; cur && ancestors.length < rows.length; ) {
+    ancestors.unshift(cur);
+    const parentId = cur.parentId;
+    cur = parentId ? rows.find((r) => r.id === parentId) ?? null : null;
+  }
   const children = rows.filter((r) => r.parentId === row.id);
 
   const parentOptions = rows
@@ -405,6 +412,7 @@ export async function getArchitectureNode(db: TenantTx, tenantId: string, id: st
     parent: parent
       ? { id: parent.id, kind: asKind(parent.kind), title: parent.title, ...displayOf(level.code, parent.sequenceNumber) }
       : null,
+    ancestors: ancestors.map((a) => ({ id: a.id, title: a.title, ...displayOf(level.code, a.sequenceNumber) })),
     children: children.map((c) => ({
       id: c.id,
       kind: asKind(c.kind),

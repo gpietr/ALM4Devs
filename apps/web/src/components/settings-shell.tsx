@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 
 /**
  * Persistent settings chrome: a left rail of section links (grouped the way the product
- * strip groups artifact tabs + LEVEL), wrapping every /settings/* page so configuration
+ * strip groups menu entries + LEVEL), wrapping every /settings/* page so configuration
  * isn't one endless scroll and you don't have to bounce back to a hub between sections.
  * Active state mirrors the product strip's primary underline - here a left border + ink.
  */

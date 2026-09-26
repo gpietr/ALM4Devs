@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 // page) so we redirect instead of throwing on `.user`.
 //
 // LastLocationRedirect (a client component) sends a returning user straight back to the
-// product/artifact/level they were last looking at, if any is remembered, or - if nothing
+// product/menu entry/level they were last looking at, if any is remembered, or - if nothing
 // is remembered - auto-continues to the tenant's one product / tells them to pick one.
 // This page's own "Signed in as" content below is the static shell around that.
 export default async function HomePage() {

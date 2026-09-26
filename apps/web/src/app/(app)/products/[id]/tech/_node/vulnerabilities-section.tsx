@@ -15,11 +15,12 @@ import { cn } from "cn";
 import { CheckCircle2, Pencil, StickyNote } from "lucide-react";
 import { useMemo, useState, memo } from "react";
 
-const SEVERITY_VARIANT: Record<string, "destructive" | "outline" | "secondary"> = {
-  CRITICAL: "destructive",
-  HIGH: "destructive",
-  MEDIUM: "outline",
-  LOW: "secondary",
+// Coded by form: ink fill, outline, muted outline.
+const SEVERITY_CLASS: Record<string, string> = {
+  CRITICAL: "border-foreground bg-foreground text-background",
+  HIGH: "border-foreground bg-foreground text-background",
+  MEDIUM: "border-foreground text-foreground",
+  LOW: "border-border text-muted-foreground",
 };
 
 interface Finding {
@@ -99,7 +100,7 @@ export function VulnerabilitiesSection({ nodeId }: { nodeId: string }) {
   const { latestScan } = list.data;
 
   return (
-    <div className="mx-auto max-w-5xl p-5">
+    <div>
       <div className="mb-3 flex items-center justify-between">
         <div>
           <p className="font-mono text-[10.5px] tracking-[0.1em] text-muted-foreground uppercase">Vulnerabilities</p>
@@ -169,13 +170,9 @@ const FindingRow = memo(function FindingRow({ nodeId, finding }: { nodeId: strin
 
   return (
     <>
-      <TableRow
-        className={cn(
-          finding.isNew && "bg-destructive/5",
-          !finding.isNew && !finding.confirmedUnderCurrentVersion && "opacity-60",
-        )}
-      >
-        <TableCell>
+      <TableRow className={cn(!finding.isNew && !finding.confirmedUnderCurrentVersion && "opacity-60")}>
+        {/* Unreviewed: 3px ink left edge (inset shadow - <tr> borders don't render here). */}
+        <TableCell className={cn(finding.isNew && "shadow-[inset_3px_0_0_var(--color-foreground)]")}>
           <a
             href={finding.sourceUrl ?? undefined}
             target="_blank"
@@ -191,7 +188,11 @@ const FindingRow = memo(function FindingRow({ nodeId, finding }: { nodeId: strin
           )}
         </TableCell>
         <TableCell>
-          {finding.severity && <Badge variant={SEVERITY_VARIANT[finding.severity] ?? "outline"}>{finding.severity}</Badge>}
+          {finding.severity && (
+            <Badge variant="outline" className={SEVERITY_CLASS[finding.severity] ?? "border-border"}>
+              {finding.severity}
+            </Badge>
+          )}
           {finding.cvssScore != null && <span className="ml-1 text-[11px] text-muted-foreground">{finding.cvssScore.toFixed(1)}</span>}
         </TableCell>
         <TableCell className="max-w-[380px] truncate text-[12.5px] text-muted-foreground" title={finding.description ?? undefined}>

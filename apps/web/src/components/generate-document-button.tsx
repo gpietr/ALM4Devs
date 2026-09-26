@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DocumentGenerationWizard, useExportDialogGuard } from "@/components/document-generation-wizard";
 import { trpc } from "@/lib/trpc-client";
 import { useState } from "react";
@@ -26,21 +26,47 @@ export function GenerateDocumentButton({
    * being captured once. */
   buildRequestBody: () => Record<string, unknown>;
 }) {
-  const templates = trpc.documentTemplates.list.useQuery({ scope });
+  const hasTemplates = useHasDocumentTemplates(scope);
   const [open, setOpen] = useState(false);
-  const { wizardRef, setIsGenerating, confirmClose } = useExportDialogGuard();
+  if (!hasTemplates) return null;
 
-  const list = templates.data ?? [];
-  if (templates.isLoading || list.length === 0) return null;
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        Export document
+      </Button>
+      <GenerateDocumentDialog scope={scope} open={open} onOpenChange={setOpen} buildRequestBody={buildRequestBody} />
+    </>
+  );
+}
+
+/** Callers hide their trigger until `scope` has a template. */
+export function useHasDocumentTemplates(scope: Scope): boolean {
+  const templates = trpc.documentTemplates.list.useQuery({ scope });
+  return (templates.data ?? []).length > 0;
+}
+
+/** The export wizard modal alone, for other triggers (e.g. a menu item). */
+export function GenerateDocumentDialog({
+  scope,
+  open,
+  onOpenChange,
+  buildRequestBody,
+}: {
+  scope: Scope;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  buildRequestBody: () => Record<string, unknown>;
+}) {
+  const { wizardRef, setIsGenerating, confirmClose } = useExportDialogGuard();
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (confirmClose(next)) setOpen(next);
+        if (confirmClose(next)) onOpenChange(next);
       }}
     >
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>Export document</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Export document</DialogTitle>
@@ -52,7 +78,7 @@ export function GenerateDocumentButton({
           extraBody={buildRequestBody()}
           fallbackFilename="document.pdf"
           onGeneratingChange={setIsGenerating}
-          onGenerated={() => setOpen(false)}
+          onGenerated={() => onOpenChange(false)}
         />
       </DialogContent>
     </Dialog>

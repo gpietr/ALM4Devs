@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
  * with UNAUTHORIZED. Centralizing the redirect here means that gap can't recur per-page.
  *
  * This deliberately does NOT render any shared nav chrome itself - the context strip
- * varies too much page to page (product-scoped vs. not, which artifact/level) to live in
+ * varies too much page to page (product-scoped vs. not, which mode/entry/level) to live in
  * one static layout slot without threading state through a client Context for little
  * benefit. Each page renders its own TopBar/ProductContextStrip
  * (see @/components/context-strip) as its first element instead.

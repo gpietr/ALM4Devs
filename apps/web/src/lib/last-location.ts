@@ -1,17 +1,19 @@
 "use client";
 
+import { entryHref, type Entry, isEntry } from "./product-nav";
+
 const KEY = "alm4devs:lastLocation";
 
 export interface LastLocation {
   productId: string;
-  artifact: "requirements" | "architecture" | "testCases" | "testSets" | "traceability" | "versions";
-  /** null for traceability/versions/testSets, which all span every level at once - see products/[id]/page.tsx. */
+  entry: Entry;
+  /** null for entries without a level rail; "all" for OTS's ALL cell. */
   levelId: string | null;
 }
 
 /**
- * Remembers only the high-level "where was I" - which product, which artifact type,
- * which level - not anything deeper (a specific requirement, a filter, a scroll position).
+ * Remembers only the high-level "where was I" - which product, which menu entry, which
+ * level - not anything deeper (a specific requirement, a filter, a scroll position).
  * Plain `localStorage`, not a backend column: this is a per-device convenience, not data
  * anyone else needs to see or that should survive a device switch.
  */
@@ -28,28 +30,15 @@ export function getLastLocation(): LastLocation | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<LastLocation>;
-    if (typeof parsed.productId !== "string") return null;
-    if (
-      parsed.artifact !== "requirements" &&
-      parsed.artifact !== "architecture" &&
-      parsed.artifact !== "testCases" &&
-      parsed.artifact !== "testSets" &&
-      parsed.artifact !== "traceability" &&
-      parsed.artifact !== "versions"
-    ) {
-      return null;
-    }
-    return { productId: parsed.productId, artifact: parsed.artifact, levelId: parsed.levelId ?? null };
+    const parsed = JSON.parse(raw) as { productId?: unknown; entry?: unknown; levelId?: unknown };
+    if (typeof parsed.productId !== "string" || typeof parsed.entry !== "string" || !isEntry(parsed.entry)) return null;
+    return { productId: parsed.productId, entry: parsed.entry, levelId: typeof parsed.levelId === "string" ? parsed.levelId : null };
   } catch {
     return null;
   }
 }
 
-/** The URL saveLastLocation's data resolves to - shared so the writer (products/[id]/page)
- * and reader (the home page redirect) can't drift apart on the format. */
+/** The URL a saved location resolves to. */
 export function lastLocationHref(location: LastLocation): string {
-  const params = new URLSearchParams({ artifact: location.artifact });
-  if (location.levelId) params.set("level", location.levelId);
-  return `/products/${location.productId}?${params.toString()}`;
+  return entryHref(location.productId, location.entry, { level: location.levelId });
 }

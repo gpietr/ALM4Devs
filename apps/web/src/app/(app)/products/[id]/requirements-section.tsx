@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { entryHref } from "@/lib/product-nav";
 import { formatItemId } from "@/lib/format-item-id";
 import type { ListColumn } from "@/lib/column-visibility";
 import { type FilterDef, useListFilters } from "@/lib/list-filters";
@@ -401,7 +402,7 @@ export function RequirementsSection({ productId, levelId }: { productId: string;
                     {visible.has("coverage") && (
                       <TableCell>
                         {r.coveredByCount > 0 ? (
-                          <Link href={`/products/${productId}?artifact=traceability`} className="text-foreground hover:underline">
+                          <Link href={entryHref(productId, "traceability")} className="text-foreground hover:underline">
                             {r.coveredByCount} test{r.coveredByCount === 1 ? "" : "s"}
                           </Link>
                         ) : (

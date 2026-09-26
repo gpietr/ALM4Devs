@@ -2,6 +2,7 @@
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { formatItemId } from "@/lib/format-item-id";
+import { architectureNodeHref } from "@/lib/product-nav";
 import { trpc } from "@/lib/trpc-client";
 import { cn } from "cn";
 import { Search } from "lucide-react";
@@ -71,7 +72,7 @@ export function JumpToItem({ productId }: { productId: string | null }) {
       kind: "requirement" as const,
     }));
     const arch = (architecture.data ?? []).map((n) => ({
-      href: `/architecture/${n.id}`,
+      href: architectureNodeHref(productId ?? "", n.id),
       displayId: formatItemId(n.levelCode, n.sequenceNumber),
       title: n.title,
       kind: "architecture" as const,
@@ -83,7 +84,7 @@ export function JumpToItem({ productId }: { productId: string | null }) {
       kind: "test case" as const,
     }));
     return [...reqs, ...arch, ...tcs];
-  }, [requirements.data, architecture.data, testCases.data]);
+  }, [requirements.data, architecture.data, testCases.data, productId]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();

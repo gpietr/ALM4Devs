@@ -13,6 +13,7 @@ import { ResultBadge } from "@/components/result-badge";
 import { SortableTableHead } from "@/components/sortable-table-head";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { entryHref } from "@/lib/product-nav";
 import { formatItemId } from "@/lib/format-item-id";
 import type { ListColumn } from "@/lib/column-visibility";
 import { type FilterDef, useListFilters } from "@/lib/list-filters";
@@ -283,7 +284,7 @@ export function TestCasesSection({ productId, levelId }: { productId: string; le
                   {visible.has("covers") && (
                     <TableCell>
                       {tc.coversCount > 0 ? (
-                        <Link href={`/products/${productId}?artifact=traceability`} className="text-foreground hover:underline">
+                        <Link href={entryHref(productId, "traceability")} className="text-foreground hover:underline">
                           {tc.coversCount} req{tc.coversCount === 1 ? "" : "s"}
                         </Link>
                       ) : (

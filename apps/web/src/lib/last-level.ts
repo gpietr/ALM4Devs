@@ -1,39 +1,48 @@
 "use client";
 
-const KEY = "alm4devs:lastLevelByArtifact";
+import type { Mode } from "./product-nav";
 
-type Artifact = "requirements" | "architecture" | "testCases";
+const KEY = "alm4devs:lastLevelByMode";
 
 /**
- * Remembers the last level viewed within each (product, artifact) pair, so switching tabs
- * (the context strip's Requirements/Test Cases links, which carry no `level` param) lands
- * back where you were instead of resetting to the first level. Separate from
- * `last-location.ts`'s single "most recent place overall" slot (for the home page's
- * redirect), which gets overwritten on every tab switch and so can't answer this same
- * question per artifact. Same per-device, `localStorage`-only convenience as that module.
+ * Last level per (product, mode), per device. Per mode rather than per entry, so
+ * Architecture and OTS share their level. OTS's ALL is stored separately so it doesn't
+ * replace the concrete level Architecture needs.
  */
-export function saveLastLevel(productId: string, artifact: Artifact, levelId: string): void {
+export function saveLastLevel(productId: string, mode: Mode, levelId: string): void {
+  write(`${productId}:${mode}`, levelId);
+}
+
+export function getLastLevel(productId: string, mode: Mode): string | null {
+  return readMap()[`${productId}:${mode}`] ?? null;
+}
+
+export function saveOtsAllLevels(productId: string, all: boolean): void {
+  write(`${productId}:ots-all`, all ? "1" : "0");
+}
+
+/** Defaults to true: OTS opens on ALL until a level is picked. */
+export function getOtsAllLevels(productId: string): boolean {
+  return readMap()[`${productId}:ots-all`] !== "0";
+}
+
+function write(field: string, value: string): void {
   try {
     const map = readMap();
-    map[`${productId}:${artifact}`] = levelId;
+    map[field] = value;
     localStorage.setItem(KEY, JSON.stringify(map));
   } catch {
     // Private browsing / storage disabled - not remembering is a fine degradation.
   }
 }
 
-export function getLastLevel(productId: string, artifact: Artifact): string | null {
-  try {
-    return readMap()[`${productId}:${artifact}`] ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function readMap(): Record<string, string> {
-  const raw = localStorage.getItem(KEY);
-  if (!raw) return {};
-  const parsed: unknown = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object") return {};
-  return parsed as Record<string, string>;
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
 }

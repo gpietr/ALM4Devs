@@ -19,6 +19,7 @@ import { emptyStep, type StepDraft, TestStepsEditor } from "@/components/test-st
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { entryHref } from "@/lib/product-nav";
 import { formatItemId } from "@/lib/format-item-id";
 import { trpc } from "@/lib/trpc-client";
 import { useUnsavedChangesGuard } from "@/lib/use-unsaved-changes-guard";
@@ -240,13 +241,13 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <>
-      <ProductContextStrip productId={testCase.productId} artifact="testCases" activeLevelId={testCase.levelId} />
+      <ProductContextStrip productId={testCase.productId} entry="testCases" activeLevelId={testCase.levelId} />
 
       {/* Sub-header: breadcrumb left, document/delete actions right - same grammar as
           the "2d" reference's own sub-header row. */}
       <div className="flex items-center justify-between border-b border-border bg-card px-5 py-[9px]">
         <span className="font-mono text-xs text-muted-foreground">
-          <Link href={`/products/${testCase.productId}?artifact=testCases&level=${testCase.levelId}`} className="hover:text-foreground">
+          <Link href={entryHref(testCase.productId, "testCases", { level: testCase.levelId })} className="hover:text-foreground">
             {testCase.levelCode}
           </Link>{" "}
           <span className="opacity-50">/</span> <span className="font-medium text-foreground">{displayId}</span>
@@ -262,7 +263,7 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
               if (!confirm(`Delete ${displayId} "${testCase.title}"? This cannot be undone.`)) return;
               deleteTestCase.mutate(
                 { id },
-                { onSuccess: () => router.push(`/products/${testCase.productId}?artifact=testCases&level=${testCase.levelId}`) },
+                { onSuccess: () => router.push(entryHref(testCase.productId, "testCases", { level: testCase.levelId })) },
               );
             }}
           >

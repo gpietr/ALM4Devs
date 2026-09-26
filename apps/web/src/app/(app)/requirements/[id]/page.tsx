@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionDiff } from "@/components/version-diff";
+import { architectureNodeHref, entryHref } from "@/lib/product-nav";
 import { formatItemId } from "@/lib/format-item-id";
 import { trpc } from "@/lib/trpc-client";
 import Link from "next/link";
@@ -120,10 +121,10 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
 
   return (
     <>
-      <ProductContextStrip productId={requirement.productId} artifact="requirements" activeLevelId={requirement.levelId} />
+      <ProductContextStrip productId={requirement.productId} entry="requirements" activeLevelId={requirement.levelId} />
       <main className="mx-auto max-w-4xl px-5 py-8">
       <Link
-        href={`/products/${requirement.productId}?artifact=requirements&level=${requirement.levelId}`}
+        href={entryHref(requirement.productId, "requirements", { level: requirement.levelId })}
         className="text-[13px] text-muted-foreground hover:text-foreground"
       >
         ← Back to {requirement.levelName}
@@ -171,7 +172,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
                 { id },
                 {
                   onSuccess: () =>
-                    router.push(`/products/${requirement.productId}?artifact=requirements&level=${requirement.levelId}`),
+                    router.push(entryHref(requirement.productId, "requirements", { level: requirement.levelId })),
                 },
               );
             }}
@@ -328,7 +329,7 @@ export default function RequirementDetailPage({ params }: { params: Promise<{ id
             {architectureLinks.map((n, i) => (
               <span key={n.id}>
                 {i > 0 && ", "}
-                <Link href={`/architecture/${n.id}`} className="text-primary underline underline-offset-2 hover:text-primary/80">
+                <Link href={architectureNodeHref(requirement.productId, n.id)} className="text-primary underline underline-offset-2 hover:text-primary/80">
                   {n.displayId}: {n.title}
                 </Link>
               </span>
