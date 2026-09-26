@@ -4,6 +4,7 @@ import { rateLimit, ruleFromEnv } from "@/server/rate-limit";
 import {
   seedDefaultArchitectureLevels,
   seedDefaultCustomFields,
+  seedDefaultDocumentTemplates,
   seedDefaultLevels,
   seedDefaultStatuses,
   seedDefaultTenantSettings,
@@ -76,6 +77,7 @@ export async function POST(req: Request) {
     await seedDefaultTestLevels(tx, tenant.id);
     await seedDefaultArchitectureLevels(tx, tenant.id);
     await seedDefaultCustomFields(tx, tenant.id);
+    await seedDefaultDocumentTemplates(tx, tenant.id);
   });
 
   const tenantId = tenant.id;

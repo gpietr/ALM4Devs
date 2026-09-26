@@ -17,6 +17,9 @@ import { useUrlState } from "@/lib/use-url-state";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState } from "react";
+import { OtsAnomaliesSection } from "./ots-anomalies-section";
+import { OtsDocumentationSection } from "./ots-documentation-section";
+import { OtsVersionControls } from "./ots-version-controls";
 import { VulnerabilitiesSection } from "./vulnerabilities-section";
 
 const KIND_LABEL = {
@@ -26,6 +29,14 @@ const KIND_LABEL = {
 } as const;
 
 const NO_PARENT = "none";
+
+// OTS-only tabs beyond Details.
+const OTS_TABS = [
+  { value: "documentation", label: "Documentation" },
+  { value: "anomalies", label: "Known issues" },
+  { value: "vulnerabilities", label: "Vulnerabilities" },
+] as const;
+type OtsTab = (typeof OTS_TABS)[number]["value"];
 
 export default function ArchitectureDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -77,11 +88,16 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
   const [recordingVersion, setRecordingVersion] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [newCpe, setNewCpe] = useState("");
+  const [newReleaseDate, setNewReleaseDate] = useState("");
+  const [newPatchLevel, setNewPatchLevel] = useState("");
+  const [newUpgradeDesignation, setNewUpgradeDesignation] = useState("");
+  const [newReleaseNotesUrl, setNewReleaseNotesUrl] = useState("");
   const [copyLinksFromPrevious, setCopyLinksFromPrevious] = useState(false);
   const [cpePickerOpen, setCpePickerOpen] = useState(false);
   const [requirementIds, setRequirementIds] = useState<string[]>([]);
   const [testCaseIds, setTestCaseIds] = useState<string[]>([]);
   const [ready, setReady] = useState(false);
+  const [documentationDirty, setDocumentationDirty] = useState(false);
   const hasInitializedRef = useRef(false);
 
   const productId = detail.data?.node.productId;
@@ -123,10 +139,21 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
   const { node, children, parentOptions, canBeRoot, versionHistory } = detail.data;
   const displayId = node.displayId;
   const kind = node.kind as keyof typeof KIND_LABEL;
-  // Only OTS nodes have a Vulnerabilities tab, so any other kind always renders Details -
-  // a stray ?tab=vulnerabilities on a non-OTS node's URL (e.g. from switching parents)
-  // doesn't leave the page stuck on a tab it can no longer show.
-  const tab = kind === "ots" && searchParams.get("tab") === "vulnerabilities" ? "vulnerabilities" : "details";
+  // Non-OTS nodes always render Details, whatever ?tab= says.
+  const tabParam = searchParams.get("tab");
+  const tab: OtsTab | "details" =
+    kind === "ots" && OTS_TABS.some((t) => t.value === tabParam) ? (tabParam as OtsTab) : "details";
+
+  function resetNewVersionForm() {
+    setRecordingVersion(false);
+    setNewVersion("");
+    setNewCpe("");
+    setNewReleaseDate("");
+    setNewPatchLevel("");
+    setNewUpgradeDesignation("");
+    setNewReleaseNotesUrl("");
+    setCopyLinksFromPrevious(false);
+  }
 
   function save() {
     const input: {
@@ -160,7 +187,7 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
           >
             {node.levelCode}
           </Link>{" "}
-          <span className="opacity-50">/</span> <span className="font-medium text-foreground">{displayId}</span>
+          <span className="opacity-50">/</span> <span className="font-medium text-foreground">{displayId} - {node.title}</span>
         </span>
         <Button
           type="button"
@@ -190,23 +217,40 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
             <button
               type="button"
               className={`px-3 py-1.5 ${tab === "details" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setParams({ tab: undefined })}
+              onClick={() => {
+                if (tab === "details") return;
+                if (documentationDirty && !confirm("You have unsaved changes to this OTS documentation. Leave without saving?")) return;
+                setDocumentationDirty(false);
+                setParams({ tab: undefined });
+              }}
             >
               Details
             </button>
-            <button
-              type="button"
-              className={`px-3 py-1.5 ${tab === "vulnerabilities" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setParams({ tab: "vulnerabilities" })}
-            >
-              Vulnerabilities
-            </button>
+            {OTS_TABS.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                className={`px-3 py-1.5 ${tab === t.value ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => {
+                  if (t.value === tab) return;
+                  if (documentationDirty && !confirm("You have unsaved changes to this OTS documentation. Leave without saving?")) return;
+                  setDocumentationDirty(false);
+                  setParams({ tab: t.value });
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
 
       {tab === "vulnerabilities" ? (
         <VulnerabilitiesSection nodeId={id} />
+      ) : tab === "documentation" ? (
+        <OtsDocumentationSection nodeId={id} productId={node.productId} onDirtyChange={setDocumentationDirty} />
+      ) : tab === "anomalies" ? (
+        <OtsAnomaliesSection nodeId={id} productId={node.productId} />
       ) : (
       <form
         className="mx-auto max-w-3xl space-y-5 p-5 pb-24"
@@ -311,6 +355,29 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                       supplier/version keyword search.
                     </span>
                   </Label>
+                  {/* Optional; fixed once recorded, like the CPE. */}
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <Label className="flex-col items-start gap-1">
+                      Release date
+                      <Input type="date" value={newReleaseDate} onChange={(e) => setNewReleaseDate(e.target.value)} />
+                    </Label>
+                    <Label className="flex-col items-start gap-1">
+                      Patch number
+                      <Input value={newPatchLevel} onChange={(e) => setNewPatchLevel(e.target.value)} />
+                    </Label>
+                    <Label className="flex-col items-start gap-1">
+                      Upgrade designation
+                      <Input value={newUpgradeDesignation} onChange={(e) => setNewUpgradeDesignation(e.target.value)} />
+                    </Label>
+                  </div>
+                  <Label className="flex-col items-start gap-1">
+                    Release notes URL
+                    <Input
+                      value={newReleaseNotesUrl}
+                      onChange={(e) => setNewReleaseNotesUrl(e.target.value)}
+                      placeholder="https://…"
+                    />
+                  </Label>
                   {node.currentVersion && (
                     <Label>
                       <Checkbox
@@ -334,17 +401,14 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                             nodeId: id,
                             version: newVersion,
                             cpe: newCpe || undefined,
+                            releaseDate: newReleaseDate || undefined,
+                            patchLevel: newPatchLevel || undefined,
+                            upgradeDesignation: newUpgradeDesignation || undefined,
+                            releaseNotesUrl: newReleaseNotesUrl || undefined,
                             copyLinksFromVersionId:
                               copyLinksFromPrevious && node.currentVersion ? node.currentVersion.id : undefined,
                           },
-                          {
-                            onSuccess: () => {
-                              setRecordingVersion(false);
-                              setNewVersion("");
-                              setNewCpe("");
-                              setCopyLinksFromPrevious(false);
-                            },
-                          },
+                          { onSuccess: resetNewVersionForm },
                         )
                       }
                     >
@@ -354,12 +418,7 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => {
-                        setRecordingVersion(false);
-                        setNewVersion("");
-                        setNewCpe("");
-                        setCopyLinksFromPrevious(false);
-                      }}
+                      onClick={resetNewVersionForm}
                     >
                       Cancel
                     </Button>
@@ -390,9 +449,12 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                             <span className={isCurrent ? "font-medium text-foreground" : "text-muted-foreground"}>
                               {v.version}
                             </span>{" "}
+                            {v.patchLevel && <span className="text-muted-foreground">patch {v.patchLevel} </span>}
+                            {v.upgradeDesignation && <span className="text-muted-foreground">({v.upgradeDesignation}) </span>}
                             {v.cpe && <span className="font-mono text-[11px] text-muted-foreground">{v.cpe}</span>}{" "}
                             <span className="text-muted-foreground">
-                              · {new Date(v.createdAt).toLocaleDateString()}
+                              {v.releaseDate && `· released ${new Date(v.releaseDate).toLocaleDateString()} `}· recorded{" "}
+                              {new Date(v.createdAt).toLocaleDateString()}
                             </span>
                             {isCurrent && (
                               <Badge variant="outline" className="ml-1.5">
@@ -431,6 +493,12 @@ export default function ArchitectureDetailPage({ params }: { params: Promise<{ i
                             })
                           }
                           addLabel="Applies to versions"
+                        />
+                        <OtsVersionControls
+                          nodeId={id}
+                          productId={node.productId}
+                          versionId={v.id}
+                          supportStatus={v.supportStatus}
                         />
                       </li>
                     );

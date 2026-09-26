@@ -13,6 +13,8 @@ export * from "./levels";
 export * from "./llm-connection";
 export * from "./members";
 export * from "./nvd-connection";
+export * from "./ots";
+export * from "./ots-default-template";
 export * from "./outbound-url";
 export * from "./requirement-levels";
 export * from "./requirement-status";

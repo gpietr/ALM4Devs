@@ -16,6 +16,7 @@ import { useUrlState } from "@/lib/use-url-state";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { OtsRegisterView } from "./ots-register-view";
 
 type Kind = "software_item" | "software_unit" | "ots";
 
@@ -43,7 +44,8 @@ export function ArchitectureSection({ productId, levelId }: { productId: string;
 
   const { searchParams, setParams } = useUrlState();
   const viewParam = searchParams.get("view");
-  const view = viewParam === "trace" ? "trace" : viewParam === "ots" ? "ots" : "tree";
+  const view =
+    viewParam === "trace" ? "trace" : viewParam === "ots" ? "ots" : viewParam === "register" ? "register" : "tree";
 
   const utils = trpc.useUtils();
   const tree = trpc.architecture.listByProduct.useQuery(
@@ -177,6 +179,14 @@ export function ArchitectureSection({ productId, levelId }: { productId: string;
               onClick={() => setParams({ view: "ots" })}
             >
               OTS
+            </button>
+            {/* Product-wide, unlike the per-level views before it. */}
+            <button
+              type="button"
+              className={`px-3 py-1.5 ${view === "register" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => setParams({ view: "register" })}
+            >
+              OTS register
             </button>
           </div>
           {view === "tree" && (
@@ -365,6 +375,7 @@ export function ArchitectureSection({ productId, levelId }: { productId: string;
       )}
 
       {view === "ots" && <OtsView productId={productId} levelId={resolvedLevelId} />}
+      {view === "register" && <OtsRegisterView productId={productId} productName={productName} />}
     </div>
   );
 }

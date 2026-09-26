@@ -18,6 +18,8 @@ import { NextResponse } from "next/server";
  * - test_case:        { templateId, testCaseId, paramValues? }
  * - test_execution:   { templateId, executionId, paramValues? }
  * - requirement_list: { templateId, requirementIds: string[], productId, levelId, paramValues? }
+ * - ots_list:         { templateId, productId, paramValues? }
+ * - ots_component:    { templateId, architectureNodeId, paramValues? }
  */
 export async function POST(req: Request) {
   const user = await requireActiveUser(req);

@@ -11,12 +11,33 @@ export type ArchitectureKind = (typeof ARCHITECTURE_KINDS)[number];
 
 type ArchitectureNodeRow = typeof schema.architectureNodes.$inferSelect;
 
+export const OTS_VERSION_SUPPORT_STATUSES = ["in_use", "allowed", "retired"] as const;
+export type OtsVersionSupportStatus = (typeof OTS_VERSION_SUPPORT_STATUSES)[number];
+
 export interface ArchitectureNodeVersionView {
   id: string;
   version: string;
   cpe: string | null;
+  releaseDate: Date | null;
+  patchLevel: string | null;
+  upgradeDesignation: string | null;
+  releaseNotesUrl: string | null;
+  supportStatus: string;
   createdAt: Date;
 }
+
+/** Every column of ArchitectureNodeVersionView, shared by each query reading version rows. */
+const VERSION_COLUMNS = {
+  id: schema.architectureNodeVersions.id,
+  version: schema.architectureNodeVersions.version,
+  cpe: schema.architectureNodeVersions.cpe,
+  releaseDate: schema.architectureNodeVersions.releaseDate,
+  patchLevel: schema.architectureNodeVersions.patchLevel,
+  upgradeDesignation: schema.architectureNodeVersions.upgradeDesignation,
+  releaseNotesUrl: schema.architectureNodeVersions.releaseNotesUrl,
+  supportStatus: schema.architectureNodeVersions.supportStatus,
+  createdAt: schema.architectureNodeVersions.createdAt,
+};
 
 export interface ArchitectureNodeView {
   id: string;
@@ -166,21 +187,15 @@ async function loadCurrentVersions(
   const map = new Map<string, ArchitectureNodeVersionView>();
   if (nodeIds.length === 0) return map;
   const rows = await db
-    .select({
-      nodeId: schema.architectureNodes.id,
-      id: schema.architectureNodeVersions.id,
-      version: schema.architectureNodeVersions.version,
-      cpe: schema.architectureNodeVersions.cpe,
-      createdAt: schema.architectureNodeVersions.createdAt,
-    })
+    .select({ nodeId: schema.architectureNodes.id, ...VERSION_COLUMNS })
     .from(schema.architectureNodes)
     .innerJoin(
       schema.architectureNodeVersions,
       eq(schema.architectureNodes.currentVersionId, schema.architectureNodeVersions.id),
     )
     .where(and(eq(schema.architectureNodes.tenantId, tenantId), inArray(schema.architectureNodes.id, nodeIds)));
-  for (const row of rows) {
-    map.set(row.nodeId, { id: row.id, version: row.version, cpe: row.cpe, createdAt: row.createdAt });
+  for (const { nodeId, ...version } of rows) {
+    map.set(nodeId, version);
   }
   return map;
 }
@@ -194,12 +209,7 @@ export async function listArchitectureNodeVersions(
   architectureNodeId: string,
 ): Promise<ArchitectureNodeVersionView[]> {
   return db
-    .select({
-      id: schema.architectureNodeVersions.id,
-      version: schema.architectureNodeVersions.version,
-      cpe: schema.architectureNodeVersions.cpe,
-      createdAt: schema.architectureNodeVersions.createdAt,
-    })
+    .select(VERSION_COLUMNS)
     .from(schema.architectureNodeVersions)
     .where(
       and(
@@ -221,12 +231,7 @@ export async function getArchitectureNodeVersion(
   versionId: string,
 ): Promise<ArchitectureNodeVersionView> {
   const [row] = await db
-    .select({
-      id: schema.architectureNodeVersions.id,
-      version: schema.architectureNodeVersions.version,
-      cpe: schema.architectureNodeVersions.cpe,
-      createdAt: schema.architectureNodeVersions.createdAt,
-    })
+    .select(VERSION_COLUMNS)
     .from(schema.architectureNodeVersions)
     .where(
       and(
@@ -587,6 +592,11 @@ export async function recordArchitectureNodeVersion(
     architectureNodeId: string;
     version: string;
     cpe?: string | null;
+    // Optional identity fields - like `cpe`, only settable at record time.
+    releaseDate?: Date | null;
+    patchLevel?: string | null;
+    upgradeDesignation?: string | null;
+    releaseNotesUrl?: string | null;
     createdBy: string;
   },
 ) {
@@ -607,6 +617,10 @@ export async function recordArchitectureNodeVersion(
       architectureNodeId: existing.id,
       version,
       cpe: params.cpe?.trim() || null,
+      releaseDate: params.releaseDate ?? null,
+      patchLevel: params.patchLevel?.trim() || null,
+      upgradeDesignation: params.upgradeDesignation?.trim() || null,
+      releaseNotesUrl: params.releaseNotesUrl?.trim() || null,
       createdBy: params.createdBy,
     })
     .returning();

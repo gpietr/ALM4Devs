@@ -1,5 +1,6 @@
 import {
   seedDefaultArchitectureLevels,
+  seedDefaultDocumentTemplates,
   seedDefaultLevels,
   seedDefaultStatuses,
   seedDefaultTenantSettings,
@@ -99,6 +100,23 @@ async function main() {
   for (const tenant of tenantsMissingArchitectureLevels) {
     await withTenant(appDb, tenant.id, (tx) => seedDefaultArchitectureLevels(tx, tenant.id));
     console.log(`Seeded default architecture levels for tenant "${tenant.name}" (${tenant.id})`);
+    anyFixed = true;
+  }
+
+  // Only for tenants with no `ots_list` template at all, so one that replaced the seeded
+  // template with their own doesn't get a second copy.
+  const tenantsMissingOtsTemplate = await adminDb
+    .select({ id: schema.tenants.id, name: schema.tenants.name })
+    .from(schema.tenants)
+    .leftJoin(
+      schema.documentTemplates,
+      and(eq(schema.documentTemplates.tenantId, schema.tenants.id), eq(schema.documentTemplates.scope, "ots_list")),
+    )
+    .groupBy(schema.tenants.id, schema.tenants.name)
+    .having(sql`count(${schema.documentTemplates.id}) = 0`);
+  for (const tenant of tenantsMissingOtsTemplate) {
+    await withTenant(appDb, tenant.id, (tx) => seedDefaultDocumentTemplates(tx, tenant.id));
+    console.log(`Seeded default OTS document template for tenant "${tenant.name}" (${tenant.id})`);
     anyFixed = true;
   }
 

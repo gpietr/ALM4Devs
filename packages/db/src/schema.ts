@@ -967,6 +967,15 @@ export const architectureNodeVersions = pgTable("architecture_node_versions", {
   // NVD vulnerability matching - nullable (falls back to a free-text supplier+title+version
   // keyword search when absent; see packages/core/src/vulnerabilities.ts's buildScanQuery).
   cpe: text("cpe"),
+  // Guidance III.A.1 identity fields - set at record time, immutable like `cpe`.
+  releaseDate: timestamp("release_date", { withTimezone: true }),
+  patchLevel: text("patch_level"),
+  upgradeDesignation: text("upgrade_designation"),
+  releaseNotesUrl: text("release_notes_url"),
+  // The one mutable column: 'in_use' | 'allowed' | 'retired' (CHECK in manual migration).
+  // The sponsor's decision about the version (validated/permitted for use), not part of
+  // its identity - changed only via setArchitectureNodeVersionSupportStatus.
+  supportStatus: text("support_status").notNull().default("in_use"),
   createdBy: text("created_by")
     .notNull()
     .references(() => user.id),
@@ -1008,6 +1017,177 @@ export const architectureNodeTestCaseLinks = pgTable(
   },
   (t) => [primaryKey({ columns: [t.architectureNodeId, t.testCaseId] })],
 );
+
+// --- OTS documentation ----------------------------------------------------------------
+// What FDA's "Off-The-Shelf Software Use in Medical Devices" guidance (2023) asks for per
+// OTS component, beyond the identity on architecture_nodes/architecture_node_versions.
+// Every field is optional; packages/core/src/ots.ts only reports gaps, never blocks.
+
+// 1:1 with an OTS node (OTS-only enforced in packages/core). No row until first saved.
+export const otsProfiles = pgTable("ots_profiles", {
+  architectureNodeId: uuid("architecture_node_id")
+    .primaryKey()
+    .references(() => architectureNodes.id, { onDelete: "cascade" }),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  // CHECK-constrained (manual migration) - see packages/core's OTS_CATEGORIES.
+  category: text("category"),
+  hostingEnvironment: text("hosting_environment"),
+  // III.A.1 What is it?
+  endUserDocumentation: text("end_user_documentation"),
+  appropriatenessRationale: text("appropriateness_rationale"),
+  designLimitations: text("design_limitations"),
+  // III.A.2 Computer system specifications (platform OTS versions: ots_platform_links)
+  hardwareRequirements: text("hardware_requirements"),
+  softwareRequirements: text("software_requirements"),
+  // III.A.3 End-user actions
+  installationConfiguration: text("installation_configuration"),
+  configurationChangeFrequency: text("configuration_change_frequency"),
+  userTraining: text("user_training"),
+  nonSpecifiedSoftwarePrevention: text("non_specified_software_prevention"),
+  // III.A.4 What does it do?
+  intendedFunction: text("intended_function"),
+  errorControlInvolvement: text("error_control_involvement"),
+  externalInterfaces: text("external_interfaces"),
+  // III.A.5 How do you know it works? reviewedAt/By attests the known-issue list is
+  // current - set only by markOtsAnomaliesReviewed.
+  anomalyListUrl: text("anomaly_list_url"),
+  updatesSourceUrl: text("updates_source_url"),
+  anomaliesReviewedAt: timestamp("anomalies_reviewed_at", { withTimezone: true }),
+  anomaliesReviewedBy: text("anomalies_reviewed_by").references(() => user.id),
+  // III.A.6 Control
+  versionControlMeasures: text("version_control_measures"),
+  configurationManagement: text("configuration_management"),
+  storageLocation: text("storage_location"),
+  installationVerification: text("installation_verification"),
+  maintenancePlan: text("maintenance_plan"),
+  // III.B Risk (risk-control requirements are the node's requirement links)
+  riskAssessment: text("risk_assessment"),
+  // III.D Assurance and continued maintenance
+  developmentAssurance: text("development_assurance"),
+  masterFileNumber: text("master_file_number"),
+  supportMechanism: text("support_mechanism"),
+  // Appendix A.5 Obsolescence
+  endOfSupportDate: timestamp("end_of_support_date", { withTimezone: true }),
+  retirementPlan: text("retirement_plan"),
+  updatedBy: text("updated_by").references(() => user.id),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// "Runs on": an OTS node -> the OTS nodes (OS, drivers, runtimes) that make up its
+// platform. Same product, not self - enforced in packages/core (self also by CHECK).
+export const otsPlatformLinks = pgTable(
+  "ots_platform_links",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    architectureNodeId: uuid("architecture_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+    platformNodeId: uuid("platform_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.architectureNodeId, t.platformNodeId] })],
+);
+
+// Known issues (vendor bugs) in an OTS item, entered by hand. The evaluation columns follow
+// the premarket software guidance's unresolved-anomalies list (section VI.J).
+export const otsAnomalies = pgTable(
+  "ots_anomalies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    architectureNodeId: uuid("architecture_node_id")
+      .notNull()
+      .references(() => architectureNodes.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    sourceUrl: text("source_url"),
+    discoveryMethod: text("discovery_method"),
+    rootCause: text("root_cause"),
+    impactEvaluation: text("impact_evaluation"),
+    // CHECK-constrained (manual migration) to 'not_applicable' | 'acceptable' | 'mitigated'
+    // | 'not_acceptable'; null = not assessed. Requires a rationale (packages/core).
+    outcome: text("outcome"),
+    rationale: text("rationale"),
+    defectClassification: text("defect_classification"),
+    mitigation: text("mitigation"),
+    endUserCommunication: text("end_user_communication"),
+    // Free text: the fix usually ships in a vendor version not recorded here yet.
+    resolvedInVersion: text("resolved_in_version"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedBy: text("updated_by").references(() => user.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("ots_anomalies_architecture_node_id_idx").on(t.architectureNodeId)],
+);
+
+// Recorded versions a known issue affects. None = every version.
+export const otsAnomalyVersions = pgTable(
+  "ots_anomaly_versions",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    anomalyId: uuid("anomaly_id")
+      .notNull()
+      .references(() => otsAnomalies.id, { onDelete: "cascade" }),
+    architectureNodeVersionId: uuid("architecture_node_version_id")
+      .notNull()
+      .references(() => architectureNodeVersions.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.anomalyId, t.architectureNodeVersionId] })],
+);
+
+// Risk-control requirements mitigating a known issue. Same product enforced in core.
+export const otsAnomalyRequirementLinks = pgTable(
+  "ots_anomaly_requirement_links",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    anomalyId: uuid("anomaly_id")
+      .notNull()
+      .references(() => otsAnomalies.id, { onDelete: "cascade" }),
+    requirementId: uuid("requirement_id")
+      .notNull()
+      .references(() => requirements.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.anomalyId, t.requirementId] })],
+);
+
+// Change-impact assessment of one recorded OTS version (guidance Appendix A, plus
+// regression analysis). Separate from the immutable version row because it's written
+// and revised after the version is recorded.
+export const otsVersionAssessments = pgTable("ots_version_assessments", {
+  architectureNodeVersionId: uuid("architecture_node_version_id")
+    .primaryKey()
+    .references(() => architectureNodeVersions.id, { onDelete: "cascade" }),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  safetyImpact: text("safety_impact"),
+  designImpact: text("design_impact"),
+  installationImpact: text("installation_impact"),
+  obsolescenceImpact: text("obsolescence_impact"),
+  regressionAnalysis: text("regression_analysis"),
+  verificationSummary: text("verification_summary"),
+  regressionTestPerformed: boolean("regression_test_performed").notNull().default(false),
+  testSetId: uuid("test_set_id").references(() => testSets.id, { onDelete: "set null" }),
+  assessedBy: text("assessed_by")
+    .notNull()
+    .references(() => user.id),
+  assessedAt: timestamp("assessed_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 // --- Software versions (release train) ----------------------------------------------
 // A product's own releases ("v1.0", "v1.1", ...) - distinct from requirementVersions/

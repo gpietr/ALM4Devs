@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 import {
+  buildOtsComponentDocumentContext,
+  buildOtsListDocumentContext,
   buildRequirementListDocumentContext,
   buildTestCaseDocumentContext,
   buildTestExecutionDocumentContext,
@@ -35,7 +37,7 @@ function toBadRequest(err: unknown): never {
   throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "request failed" });
 }
 
-const SCOPES = ["test_case", "test_execution", "requirement_list"] as const;
+const SCOPES = ["test_case", "test_execution", "requirement_list", "ots_list", "ots_component"] as const;
 const PARAM_TYPES = ["text", "date"] as const;
 
 /** Template + parameter CRUD (backlog item 9.29's settings side) - generation itself is a
@@ -253,6 +255,7 @@ export const documentTemplatesRouter = router({
         requirementIds: z.array(z.string().uuid()).optional(),
         productId: z.string().uuid().optional(),
         levelId: z.string().uuid().optional(),
+        architectureNodeId: z.string().uuid().optional(),
         paramValues: z.record(z.string(), z.string()).optional(),
       }),
     )
@@ -276,6 +279,12 @@ export const documentTemplatesRouter = router({
             if (input.testCaseId) context = await buildTestCaseDocumentContext(tx, tenantId, input.testCaseId);
           } else if (template.scope === "test_execution") {
             if (input.executionId) context = await buildTestExecutionDocumentContext(tx, tenantId, input.executionId);
+          } else if (template.scope === "ots_component") {
+            if (input.architectureNodeId) {
+              context = await buildOtsComponentDocumentContext(tx, tenantId, input.architectureNodeId);
+            }
+          } else if (template.scope === "ots_list") {
+            if (input.productId) context = await buildOtsListDocumentContext(tx, tenantId, input.productId);
           } else {
             if (input.requirementIds?.length && input.productId && input.levelId) {
               const [product] = await tx.select().from(schema.products).where(eq(schema.products.id, input.productId));

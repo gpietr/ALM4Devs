@@ -13,11 +13,13 @@ import { isUniqueViolation } from "./level-sequences";
  * since neither of those needs a database connection the way this does.
  */
 
-export type DocumentTemplateScope = "test_case" | "test_execution" | "requirement_list";
+export type DocumentTemplateScope = "test_case" | "test_execution" | "requirement_list" | "ots_list" | "ots_component";
 export const DOCUMENT_TEMPLATE_SCOPES: ReadonlyArray<{ value: DocumentTemplateScope; label: string }> = [
   { value: "test_case", label: "Test case" },
   { value: "test_execution", label: "Test execution" },
   { value: "requirement_list", label: "Requirement list" },
+  { value: "ots_list", label: "OTS software list" },
+  { value: "ots_component", label: "OTS component" },
 ];
 
 export type DocumentTemplateParameterType = "text" | "date";

@@ -1,4 +1,6 @@
 import {
+  buildOtsComponentDocumentContext,
+  buildOtsListDocumentContext,
   buildRequirementListDocumentContext,
   buildTestCaseDocumentContext,
   buildTestExecutionDocumentContext,
@@ -25,6 +27,7 @@ export interface GenerateTarget {
   requirementIds?: string[];
   productId?: string;
   levelId?: string;
+  architectureNodeId?: string;
 }
 
 async function buildContext(
@@ -40,6 +43,14 @@ async function buildContext(
   if (scope === "test_execution") {
     if (!target.executionId) throw new DomainError("executionId is required for a test execution template");
     return buildTestExecutionDocumentContext(tx, tenantId, target.executionId);
+  }
+  if (scope === "ots_component") {
+    if (!target.architectureNodeId) throw new DomainError("architectureNodeId is required for an OTS component template");
+    return buildOtsComponentDocumentContext(tx, tenantId, target.architectureNodeId);
+  }
+  if (scope === "ots_list") {
+    if (!target.productId) throw new DomainError("productId is required for an OTS list template");
+    return buildOtsListDocumentContext(tx, tenantId, target.productId);
   }
   if (!target.requirementIds?.length) throw new DomainError("requirementIds is required for a requirement list template");
   if (!target.productId || !target.levelId) throw new DomainError("productId and levelId are required for a requirement list template");

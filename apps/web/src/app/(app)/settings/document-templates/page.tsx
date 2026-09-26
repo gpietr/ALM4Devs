@@ -10,7 +10,7 @@ import { trpc } from "@/lib/trpc-client";
 import { ChevronDown, ChevronUp, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 
-type Scope = "test_case" | "test_execution" | "requirement_list";
+type Scope = "test_case" | "test_execution" | "requirement_list" | "ots_list" | "ots_component";
 type ParamType = "text" | "date";
 
 const HANDLEBARS_DOCS_URL = "https://handlebarsjs.com/guide/expressions.html";
@@ -25,6 +25,68 @@ interface PlaceholderField {
   html?: boolean;
   note?: string;
 }
+
+const OTS_COMPONENT_FIELDS: PlaceholderField[] = [
+    { path: "productName" },
+    { path: "displayId" },
+    { path: "title" },
+    { path: "supplier" },
+    { path: "category" },
+    { path: "endOfSupportDate" },
+    { path: "generatedAt" },
+    { path: "endUserDocumentation", note: "every text field below is plain text, or null if empty (wrap in {{#if}})" },
+    { path: "appropriatenessRationale" },
+    { path: "designLimitations" },
+    { path: "hardwareRequirements" },
+    { path: "softwareRequirements" },
+    { path: "hostingEnvironment" },
+    { path: "installationConfiguration" },
+    { path: "configurationChangeFrequency" },
+    { path: "userTraining" },
+    { path: "nonSpecifiedSoftwarePrevention" },
+    { path: "intendedFunction" },
+    { path: "errorControlInvolvement" },
+    { path: "externalInterfaces" },
+    { path: "anomalyListUrl" },
+    { path: "updatesSourceUrl" },
+    { path: "anomaliesReviewedAt" },
+    { path: "anomaliesReviewedBy" },
+    { path: "versionControlMeasures" },
+    { path: "configurationManagement" },
+    { path: "storageLocation" },
+    { path: "installationVerification" },
+    { path: "maintenancePlan" },
+    { path: "riskAssessment" },
+    { path: "developmentAssurance" },
+    { path: "masterFileNumber" },
+    { path: "supportMechanism" },
+    { path: "retirementPlan" },
+    { path: "currentVersion.version", note: "also .releaseDate, .patchLevel, .upgradeDesignation, .cpe - null if no version" },
+    { path: "#each allowedVersions", note: "loop of version strings - {{this}}" },
+    { path: "#each versions", note: "loop - every recorded version" },
+    { path: "  this.version" },
+    { path: "  this.isCurrent" },
+    { path: "  this.releaseDate" },
+    { path: "  this.patchLevel" },
+    { path: "  this.upgradeDesignation" },
+    { path: "  this.supportStatus" },
+    { path: "  this.shippedIn", note: "list of product release numbers" },
+    { path: "  this.assessment", note: "null, or .safetyImpact .designImpact .installationImpact .obsolescenceImpact .regressionAnalysis .verificationSummary .regressionTestPerformed .testSetName .assessedAt" },
+    { path: "#each platforms", note: "loop - OTS items this runs on" },
+    { path: "  this.displayId" },
+    { path: "  this.title" },
+    { path: "  this.version" },
+    { path: "  this.patchLevel" },
+    { path: "#each anomalies", note: "loop - known issues" },
+    { path: "  this.title" },
+    { path: "  this.externalId" },
+    { path: "  this.impactEvaluation" },
+    { path: "  this.outcome" },
+    { path: "  this.rationale", note: "also .discoveryMethod .rootCause .defectClassification .mitigation .endUserCommunication .affectedVersions .resolvedInVersion .requirements" },
+    { path: "#each requirements", note: "loop - linked requirements" },
+    { path: "#each testCases", note: "loop - linked test cases" },
+    { path: "completeness.filled", note: "also .total and #each completeness.gaps (.message .enhancedOnly)" },
+  ];
 
 const PLACEHOLDER_FIELDS: Record<Scope, PlaceholderField[]> = {
   test_case: [
@@ -62,6 +124,23 @@ const PLACEHOLDER_FIELDS: Record<Scope, PlaceholderField[]> = {
     { path: "  this.recordedAt" },
     { path: "  this.evidenceFilenames", note: "a list of filenames - enumerate with {{#each this.evidenceFilenames}}{{this}}{{/each}}" },
   ],
+  ots_component: OTS_COMPONENT_FIELDS,
+  ots_list: [
+    { path: "productName" },
+    { path: "generatedAt" },
+    { path: "componentCount" },
+    { path: "#each components", note: "loop - each has every OTS component field (see that scope)" },
+    { path: "#each releaseChanges", note: "loop - product releases, oldest first" },
+    { path: "  this.versionNumber" },
+    { path: "  this.releaseDate" },
+    { path: "  this.hasChanges" },
+    { path: "  #each this.added", note: ".displayId .title .version" },
+    { path: "  #each this.changed", note: ".displayId .title .from .to .assessments" },
+    { path: "  #each this.removed", note: ".displayId .title .version" },
+    { path: "#each unresolvedAnomaliesByRelease", note: "loop - unresolved known issues per release" },
+    { path: "  this.versionNumber" },
+    { path: "  #each this.anomalies", note: ".component.displayId/.title/.version plus every known-issue field" },
+  ],
   requirement_list: [
     { path: "productName" },
     { path: "levelName" },
@@ -87,12 +166,16 @@ const DEFAULT_FILENAME_TEMPLATE: Record<Scope, string> = {
   test_case: "{{displayId}} - {{title}}",
   test_execution: "{{testCase.displayId}} - {{testCase.title}} - {{status}}",
   requirement_list: "{{productName}} - {{levelName}}",
+  ots_list: "{{productName}} - OTS Software Documentation",
+  ots_component: "{{displayId}} - {{title}}",
 };
 
 const SCOPES: Array<{ value: Scope; label: string; description: string }> = [
   { value: "test_case", label: "Test case", description: "Generated from one test case's own definition (title, steps, linked requirements) - no execution or run results." },
   { value: "test_execution", label: "Test execution", description: "Generated from one recorded run of a test case - actual results, status, evidence filenames." },
   { value: "requirement_list", label: "Requirement list", description: "Generated from whatever a requirements list is currently showing (respecting its filters) - a spec or coverage-style document." },
+  { value: "ots_list", label: "OTS software list", description: "Generated from a product's OTS register - every OTS item's documentation, OTS changes per release and unresolved known issues." },
+  { value: "ots_component", label: "OTS component", description: "Generated from one OTS item's Documentation tab - its documentation, versions, and known issues." },
 ];
 
 /**
@@ -578,7 +661,10 @@ function TemplatePreviewPane({
 
   const exampleTestCases = trpc.documentTemplates.listExampleTestCases.useQuery(undefined, { enabled: scope === "test_case" });
   const exampleExecutions = trpc.documentTemplates.listExampleExecutions.useQuery(undefined, { enabled: scope === "test_execution" });
-  const products = trpc.products.list.useQuery(undefined, { enabled: scope === "requirement_list" });
+  const [otsNodeId, setOtsNodeId] = useState("");
+  const isOtsScope = scope === "ots_list" || scope === "ots_component";
+  const products = trpc.products.list.useQuery(undefined, { enabled: scope === "requirement_list" || isOtsScope });
+  const otsRegister = trpc.ots.register.useQuery({ productId }, { enabled: scope === "ots_component" && Boolean(productId) });
   const levels = trpc.requirements.listLevels.useQuery(undefined, { enabled: scope === "requirement_list" });
   const requirementsForLevel = trpc.requirements.listByProduct.useQuery(
     { productId, levelId },
@@ -595,7 +681,9 @@ function TemplatePreviewPane({
     const hasExample =
       (scope === "test_case" && testCaseId) ||
       (scope === "test_execution" && executionId) ||
-      (scope === "requirement_list" && requirementIds.length > 0);
+      (scope === "requirement_list" && requirementIds.length > 0) ||
+      (scope === "ots_list" && productId) ||
+      (scope === "ots_component" && otsNodeId);
     if (!hasExample) return;
 
     const handle = setTimeout(() => {
@@ -606,8 +694,9 @@ function TemplatePreviewPane({
         testCaseId: scope === "test_case" ? testCaseId : undefined,
         executionId: scope === "test_execution" ? executionId : undefined,
         requirementIds: scope === "requirement_list" ? requirementIds : undefined,
-        productId: scope === "requirement_list" ? productId : undefined,
+        productId: scope === "requirement_list" || scope === "ots_list" ? productId : undefined,
         levelId: scope === "requirement_list" ? levelId : undefined,
+        architectureNodeId: scope === "ots_component" ? otsNodeId : undefined,
         paramValues: previewParamValues,
       });
     }, 500);
@@ -621,6 +710,7 @@ function TemplatePreviewPane({
     executionId,
     productId,
     levelId,
+    otsNodeId,
     requirementsForLevel.data,
     previewParamValues,
   ]);
@@ -656,6 +746,42 @@ function TemplatePreviewPane({
               ))}
             </SelectContent>
           </Select>
+        )}
+        {isOtsScope && (
+          <>
+            <Select
+              value={productId}
+              onValueChange={(v) => {
+                setProductId(v ?? "");
+                setOtsNodeId("");
+              }}
+            >
+              <SelectTrigger className="h-7 w-36 text-xs">
+                <SelectValue placeholder="Product" />
+              </SelectTrigger>
+              <SelectContent>
+                {(products.data ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {scope === "ots_component" && productId && (
+              <Select value={otsNodeId} onValueChange={(v) => setOtsNodeId(v ?? "")}>
+                <SelectTrigger className="h-7 w-56 text-xs">
+                  <SelectValue placeholder="Pick an OTS item" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(otsRegister.data ?? []).map((r) => (
+                    <SelectItem key={r.node.id} value={r.node.id}>
+                      {r.node.displayId}: {r.node.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </>
         )}
         {scope === "requirement_list" && (
           <>

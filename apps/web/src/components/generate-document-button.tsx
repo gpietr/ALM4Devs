@@ -6,7 +6,7 @@ import { DocumentGenerationWizard, useExportDialogGuard } from "@/components/doc
 import { trpc } from "@/lib/trpc-client";
 import { useState } from "react";
 
-type Scope = "test_case" | "test_execution" | "requirement_list";
+type Scope = "test_case" | "test_execution" | "requirement_list" | "ots_list" | "ots_component";
 
 /**
  * "Export document" - the single-item export half of backlog item 9.29, now a button

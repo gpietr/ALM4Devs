@@ -82,6 +82,11 @@ export const vulnerabilitiesRouter = router({
         nodeId: z.string().uuid(),
         version: z.string().trim().min(1).max(100),
         cpe: z.string().trim().max(500).optional(),
+        // Optional identity fields, fixed at record time like `cpe`.
+        releaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        patchLevel: z.string().trim().max(200).optional(),
+        upgradeDesignation: z.string().trim().max(200).optional(),
+        releaseNotesUrl: z.string().trim().max(2000).optional(),
         // When set, the new version starts tagged with the same "applies to software
         // versions" links as this earlier version, instead of starting untagged - a
         // component version bump (e.g. Log4j 2.14.1 -> 2.15.1) usually still ships in the
@@ -100,6 +105,10 @@ export const vulnerabilitiesRouter = router({
           architectureNodeId: input.nodeId,
           version: input.version,
           cpe: input.cpe,
+          releaseDate: input.releaseDate ? new Date(input.releaseDate) : null,
+          patchLevel: input.patchLevel,
+          upgradeDesignation: input.upgradeDesignation,
+          releaseNotesUrl: input.releaseNotesUrl,
           createdBy: userId,
         });
         if (input.copyLinksFromVersionId) {

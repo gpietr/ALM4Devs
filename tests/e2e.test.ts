@@ -4933,3 +4933,379 @@ describe("e2e: integration connection hardening", () => {
     expect((await fetch(`${BASE_URL}/api/storage/file/${otherPayload}.${sig}`)).status).toBe(403);
   }, 20000);
 });
+
+describe("e2e: OTS documentation (FDA OTS guidance)", () => {
+  async function setupOtsProduct(tenant: TestTenant, name = "OTS Product") {
+    const product = await rpc(tenant.cookie, "POST", "products.create", { name });
+    expect(product.ok).toBe(true);
+    const levels = await rpc(tenant.cookie, "GET", "architecture.listLevels");
+    const sw = levels.data.find((l: any) => l.code === "SWARCH");
+    const item = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId: product.data.id,
+      levelId: sw.id,
+      kind: "software_item",
+      title: "Application",
+    });
+    expect(item.ok).toBe(true);
+    return { productId: product.data.id as string, levelId: sw.id as string, itemId: item.data.node.id as string };
+  }
+
+  async function createOts(
+    tenant: TestTenant,
+    ctx: { productId: string; levelId: string; itemId: string },
+    title: string,
+    version?: string,
+  ): Promise<string> {
+    const node = await rpc(tenant.cookie, "POST", "architecture.create", {
+      productId: ctx.productId,
+      levelId: ctx.levelId,
+      kind: "ots",
+      parentId: ctx.itemId,
+      title,
+      supplier: "Vendor",
+      version,
+    });
+    expect(node.ok).toBe(true);
+    return node.data.node.id;
+  }
+
+  async function versionIds(tenant: TestTenant, nodeId: string): Promise<Record<string, string>> {
+    const doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
+    expect(doc.ok).toBe(true);
+    return Object.fromEntries(doc.data.versions.map((v: any) => [v.version, v.id]));
+  }
+
+  test("registering seeds the FDA OTS template with optional documentation-level parameters", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const templates = await rpc(tenant.cookie, "GET", "documentTemplates.list", { scope: "ots_list" });
+    expect(templates.ok).toBe(true);
+    expect(templates.data.map((t: any) => t.name)).toEqual(["OTS Software Documentation"]);
+    const params = templates.data[0].parameters;
+    expect(params.map((p: any) => p.key)).toEqual(["documentationLevel", "documentationLevelRationale"]);
+    expect(params.every((p: any) => p.isRequired === false)).toBe(true);
+  });
+
+  test("every profile field is optional; partial saves persist; non-OTS nodes are rejected; saves are audited", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const ctx = await setupOtsProduct(tenant);
+    const nodeId = await createOts(tenant, ctx, "SQLite", "3.45.0");
+
+    const empty = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
+    expect(empty.ok).toBe(true);
+    expect(empty.data.profile.intendedFunction).toBeNull();
+    expect(empty.data.completeness.filled).toBe(0);
+
+    // Saving with nothing filled in is valid - no field is required at any level.
+    const blank = await rpc(tenant.cookie, "POST", "ots.updateProfile", { nodeId, fields: {} });
+    expect(blank.ok).toBe(true);
+
+    const saved = await rpc(tenant.cookie, "POST", "ots.updateProfile", {
+      nodeId,
+      fields: { category: "database", intendedFunction: "Local persistence of measurements", endOfSupportDate: "2030-12-31" },
+    });
+    expect(saved.ok).toBe(true);
+    // A second partial save leaves the first save's fields alone.
+    await rpc(tenant.cookie, "POST", "ots.updateProfile", { nodeId, fields: { designLimitations: "Single writer" } });
+    const doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
+    expect(doc.data.profile.category).toBe("database");
+    expect(doc.data.profile.intendedFunction).toBe("Local persistence of measurements");
+    expect(doc.data.profile.designLimitations).toBe("Single writer");
+    expect(doc.data.profile.endOfSupportDate.slice(0, 10)).toBe("2030-12-31");
+    expect(doc.data.completeness.filled).toBe(3);
+
+    const badCategory = await rpc(tenant.cookie, "POST", "ots.updateProfile", { nodeId, fields: { category: "spreadsheet" } });
+    expect(badCategory.ok).toBe(false);
+
+    const notOts = await rpc(tenant.cookie, "POST", "ots.updateProfile", { nodeId: ctx.itemId, fields: { intendedFunction: "x" } });
+    expect(notOts.ok).toBe(false);
+    expect(notOts.error?.message).toMatch(/only valid on OTS items/);
+
+    const sql = new SQL(PG_SUPERUSER_URL);
+    const rows = await sql`select action from audit_log where entity_id = ${nodeId} and action = 'ots.profile_updated'`;
+    await sql.close();
+    expect(rows.length).toBe(3);
+  });
+
+  test("platform links must be other OTS items in the same product", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const ctx = await setupOtsProduct(tenant);
+    const app = await createOts(tenant, ctx, "Qt", "6.7.0");
+    const os = await createOts(tenant, ctx, "Windows 11 IoT Enterprise", "23H2");
+    await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", { nodeId: os, version: "24H2", patchLevel: "KB5040442" });
+
+    const linked = await rpc(tenant.cookie, "POST", "ots.setPlatformLinks", { nodeId: app, platformNodeIds: [os] });
+    expect(linked.ok).toBe(true);
+    const doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId: app });
+    expect(doc.data.platforms).toHaveLength(1);
+    // The platform's *current* recorded version and patch come through - III.A.2's
+    // "specific version levels ... and a complete list of any patches".
+    expect(doc.data.platforms[0].currentVersion).toEqual({ version: "24H2", patchLevel: "KB5040442", upgradeDesignation: null });
+
+    const self = await rpc(tenant.cookie, "POST", "ots.setPlatformLinks", { nodeId: app, platformNodeIds: [app] });
+    expect(self.ok).toBe(false);
+    const item = await rpc(tenant.cookie, "POST", "ots.setPlatformLinks", { nodeId: app, platformNodeIds: [ctx.itemId] });
+    expect(item.ok).toBe(false);
+    expect(item.error?.message).toMatch(/must be OTS items/);
+
+    const other = await setupOtsProduct(tenant, "Other product");
+    const foreign = await createOts(tenant, other, "Linux", "6.8");
+    const crossProduct = await rpc(tenant.cookie, "POST", "ots.setPlatformLinks", { nodeId: app, platformNodeIds: [foreign] });
+    expect(crossProduct.ok).toBe(false);
+    expect(crossProduct.error?.message).toMatch(/same product/);
+  });
+
+  test("version identity fields, support status and change-impact assessment", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const ctx = await setupOtsProduct(tenant);
+    const nodeId = await createOts(tenant, ctx, "OpenSSL");
+    const recorded = await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", {
+      nodeId,
+      version: "3.0.13",
+      releaseDate: "2024-01-30",
+      patchLevel: "p1",
+      upgradeDesignation: "LTS",
+      releaseNotesUrl: "https://example.com/notes",
+    });
+    expect(recorded.ok).toBe(true);
+    const detail = await rpc(tenant.cookie, "GET", "architecture.get", { id: nodeId });
+    const v = detail.data.versionHistory[0];
+    expect(v.patchLevel).toBe("p1");
+    expect(v.upgradeDesignation).toBe("LTS");
+    expect(v.releaseDate.slice(0, 10)).toBe("2024-01-30");
+    expect(v.supportStatus).toBe("in_use");
+
+    const allowed = await rpc(tenant.cookie, "POST", "ots.setVersionStatus", { nodeId, versionId: v.id, supportStatus: "allowed" });
+    expect(allowed.ok).toBe(true);
+    let doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
+    expect(doc.data.completeness.gaps.some((g: any) => g.field === "versionAssessment")).toBe(true);
+
+    const assessed = await rpc(tenant.cookie, "POST", "ots.saveVersionAssessment", {
+      nodeId,
+      versionId: v.id,
+      fields: { regressionAnalysis: "TLS paths only", regressionTestPerformed: true },
+    });
+    expect(assessed.ok).toBe(true);
+    doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
+    expect(doc.data.versions[0].assessment.regressionAnalysis).toBe("TLS paths only");
+    expect(doc.data.versions[0].assessment.regressionTestPerformed).toBe(true);
+    expect(doc.data.completeness.gaps.some((g: any) => g.field === "versionAssessment")).toBe(false);
+
+    // A version id belonging to some other OTS item is rejected.
+    const otherNode = await createOts(tenant, ctx, "zlib", "1.3");
+    const otherVersionId = (await versionIds(tenant, otherNode))["1.3"];
+    const wrongNode = await rpc(tenant.cookie, "POST", "ots.setVersionStatus", {
+      nodeId,
+      versionId: otherVersionId,
+      supportStatus: "retired",
+    });
+    expect(wrongNode.ok).toBe(false);
+    expect(wrongNode.error?.message).toMatch(/do not belong to this OTS item/);
+  });
+
+  test("anomalies: an outcome needs a rationale, versions must be the item's own, register counts them", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const ctx = await setupOtsProduct(tenant);
+    const nodeId = await createOts(tenant, ctx, "libusb", "1.0.26");
+    const v = (await versionIds(tenant, nodeId))["1.0.26"];
+
+    const unassessed = await rpc(tenant.cookie, "POST", "ots.createAnomaly", {
+      nodeId,
+      anomaly: { title: "Hotplug callback race", affectedVersionIds: [v] },
+    });
+    expect(unassessed.ok).toBe(true);
+
+    const noRationale = await rpc(tenant.cookie, "POST", "ots.createAnomaly", {
+      nodeId,
+      anomaly: { title: "Timeout ignored", outcome: "acceptable" },
+    });
+    expect(noRationale.ok).toBe(false);
+    expect(noRationale.error?.message).toMatch(/rationale is required/);
+
+    const { requirementId } = await createRequirement(tenant, { productId: ctx.productId });
+    const assessed = await rpc(tenant.cookie, "POST", "ots.createAnomaly", {
+      nodeId,
+      anomaly: {
+        externalId: "#512",
+        title: "Timeout ignored",
+        impactEvaluation: "Device retries; no clinical impact",
+        outcome: "acceptable",
+        rationale: "Watchdog restarts the transfer",
+        requirementIds: [requirementId],
+      },
+    });
+    expect(assessed.ok).toBe(true);
+
+    const otherNode = await createOts(tenant, ctx, "hidapi", "0.14");
+    const foreignVersion = (await versionIds(tenant, otherNode))["0.14"];
+    const wrongVersion = await rpc(tenant.cookie, "POST", "ots.createAnomaly", {
+      nodeId,
+      anomaly: { title: "X", affectedVersionIds: [foreignVersion] },
+    });
+    expect(wrongVersion.ok).toBe(false);
+
+    const doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
+    expect(doc.data.anomalies).toHaveLength(2);
+    const withReq = doc.data.anomalies.find((a: any) => a.externalId === "#512");
+    expect(withReq.requirements.map((r: any) => r.id)).toEqual([requirementId]);
+
+    let register = await rpc(tenant.cookie, "GET", "ots.register", { productId: ctx.productId });
+    const row = register.data.find((r: any) => r.node.id === nodeId);
+    expect(row.anomalyCounts).toEqual({ total: 2, unassessed: 1, notAcceptable: 0 });
+    expect(row.anomaliesReviewedAt).toBeNull();
+
+    const reviewed = await rpc(tenant.cookie, "POST", "ots.markAnomaliesReviewed", { nodeId });
+    expect(reviewed.ok).toBe(true);
+    const deleted = await rpc(tenant.cookie, "POST", "ots.deleteAnomaly", { anomalyId: unassessed.data.id });
+    expect(deleted.ok).toBe(true);
+    register = await rpc(tenant.cookie, "GET", "ots.register", { productId: ctx.productId });
+    const after = register.data.find((r: any) => r.node.id === nodeId);
+    expect(after.anomalyCounts).toEqual({ total: 1, unassessed: 0, notAcceptable: 0 });
+    expect(after.anomaliesReviewedAt).not.toBeNull();
+    // The register spans every OTS item in the product.
+    expect(register.data.map((r: any) => r.node.title).sort()).toEqual(["hidapi", "libusb"]);
+  });
+
+  test("release views: OTS changes between releases, and unresolved anomalies per release", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const ctx = await setupOtsProduct(tenant);
+    const lib = await createOts(tenant, ctx, "protobuf", "3.21");
+    await rpc(tenant.cookie, "POST", "vulnerabilities.recordVersion", { nodeId: lib, version: "3.25" });
+    const added = await createOts(tenant, ctx, "fmt", "10.2");
+    const libVersions = await versionIds(tenant, lib);
+    const fmtVersion = (await versionIds(tenant, added))["10.2"];
+
+    const r1 = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId: ctx.productId,
+      versionNumber: "1.0",
+      releaseDate: "2025-01-01",
+    });
+    const r2 = await rpc(tenant.cookie, "POST", "softwareVersions.create", {
+      productId: ctx.productId,
+      versionNumber: "2.0",
+      releaseDate: "2026-01-01",
+    });
+    const tag = (nodeId: string, versionId: string, releaseIds: string[]) =>
+      rpc(tenant.cookie, "POST", "architecture.setVersionSoftwareVersions", {
+        nodeId,
+        architectureNodeVersionId: versionId,
+        softwareVersionIds: releaseIds,
+      });
+    expect((await tag(lib, libVersions["3.21"]!, [r1.data.id])).ok).toBe(true);
+    expect((await tag(lib, libVersions["3.25"]!, [r2.data.id])).ok).toBe(true);
+    expect((await tag(added, fmtVersion!, [r2.data.id])).ok).toBe(true);
+
+    const changes = await rpc(tenant.cookie, "GET", "ots.releaseChanges", { productId: ctx.productId });
+    expect(changes.ok).toBe(true);
+    expect(changes.data.map((r: any) => r.release.versionNumber)).toEqual(["1.0", "2.0"]);
+    expect(changes.data[0].added.map((c: any) => c.title)).toEqual(["protobuf"]);
+    expect(changes.data[1].added.map((c: any) => c.title)).toEqual(["fmt"]);
+    expect(changes.data[1].changed.map((c: any) => [c.title, c.from, c.to])).toEqual([["protobuf", "3.21", "3.25"]]);
+    expect(changes.data[1].removed).toEqual([]);
+
+    // Affects 3.21 only (fixed upstream in 3.25): listed under release 1.0, not 2.0.
+    const anomaly = await rpc(tenant.cookie, "POST", "ots.createAnomaly", {
+      nodeId: lib,
+      anomaly: { title: "Varint overflow", affectedVersionIds: [libVersions["3.21"]], resolvedInVersion: "3.25" },
+    });
+    expect(anomaly.ok).toBe(true);
+    // Not narrowed to any version: conservatively listed under every release that ships it.
+    const unnarrowed = await rpc(tenant.cookie, "POST", "ots.createAnomaly", {
+      nodeId: added,
+      anomaly: { title: "Locale bug" },
+    });
+    expect(unnarrowed.ok).toBe(true);
+
+    const template = await rpc(tenant.cookie, "POST", "documentTemplates.create", {
+      scope: "ots_list",
+      name: "Unresolved per release",
+      htmlTemplate:
+        "{{#each unresolvedAnomaliesByRelease}}[{{versionNumber}}:{{#each anomalies}}{{title}}@{{component.version}};{{/each}}]{{/each}}",
+    });
+    expect(template.ok).toBe(true);
+    const preview = await rpc(tenant.cookie, "POST", "documentTemplates.previewHtml", {
+      templateId: template.data.id,
+      htmlTemplate:
+        "{{#each unresolvedAnomaliesByRelease}}[{{versionNumber}}:{{#each anomalies}}{{title}}@{{component.version}};{{/each}}]{{/each}}",
+      productId: ctx.productId,
+    });
+    expect(preview.ok).toBe(true);
+    expect(preview.data.error).toBeNull();
+    expect(preview.data.html).toContain("[1.0:Varint overflow@3.21;][2.0:Locale bug@10.2;]");
+  });
+
+  test("the seeded ots_list template and an ots_component template generate real PDFs", async () => {
+    const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const ctx = await setupOtsProduct(tenant);
+    const nodeId = await createOts(tenant, ctx, "FreeRTOS", "10.6.2");
+    await rpc(tenant.cookie, "POST", "ots.updateProfile", {
+      nodeId,
+      fields: { category: "operating_system", intendedFunction: "Task scheduling", developmentAssurance: "SafeRTOS lineage" },
+    });
+    await rpc(tenant.cookie, "POST", "ots.createAnomaly", {
+      nodeId,
+      anomaly: { title: "Tick drift", outcome: "not_applicable", rationale: "Tickless idle disabled" },
+    });
+
+    const seeded = (await rpc(tenant.cookie, "GET", "documentTemplates.list", { scope: "ots_list" })).data[0];
+    const isPdf = (bytes: Uint8Array) => new TextDecoder().decode(bytes.slice(0, 5)) === "%PDF-";
+
+    const list = await generateDocument(tenant.cookie, {
+      templateId: seeded.id,
+      productId: ctx.productId,
+      paramValues: { documentationLevel: "Basic", documentationLevelRationale: "No probable risk of serious injury" },
+    });
+    expect(list.ok).toBe(true);
+    expect(isPdf(list.bytes)).toBe(true);
+    expect(list.contentDisposition).toContain("OTS Product - OTS Software Documentation.pdf");
+
+    // Documentation-level parameters are optional - the seeded template renders without them.
+    const withoutLevel = await generateDocument(tenant.cookie, { templateId: seeded.id, productId: ctx.productId });
+    expect(withoutLevel.ok).toBe(true);
+
+    const component = await rpc(tenant.cookie, "POST", "documentTemplates.create", {
+      scope: "ots_component",
+      name: "One OTS",
+      htmlTemplate: "<h1>{{displayId}} {{title}}</h1><p>{{intendedFunction}}</p>{{#each anomalies}}<p>{{title}}: {{outcome}}</p>{{/each}}",
+    });
+    expect(component.ok).toBe(true);
+    const preview = await rpc(tenant.cookie, "POST", "documentTemplates.previewHtml", {
+      templateId: component.data.id,
+      htmlTemplate: "{{title}}|{{category}}|{{intendedFunction}}|{{#each anomalies}}{{title}}={{outcome}}{{/each}}",
+      architectureNodeId: nodeId,
+    });
+    expect(preview.data.html).toContain("FreeRTOS|Operating system|Task scheduling|Tick drift=Not applicable");
+    const pdf = await generateDocument(tenant.cookie, { templateId: component.data.id, architectureNodeId: nodeId });
+    expect(pdf.ok).toBe(true);
+    expect(isPdf(pdf.bytes)).toBe(true);
+
+    const missingTarget = await generateDocument(tenant.cookie, { templateId: component.data.id });
+    expect(missingTarget.ok).toBe(false);
+    expect(missingTarget.error).toMatch(/architectureNodeId is required/);
+  });
+
+  test("another tenant can't read or write an OTS item's documentation", async () => {
+    const owner = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    const ctx = await setupOtsProduct(owner);
+    const nodeId = await createOts(owner, ctx, "Private OTS", "1.0");
+    await rpc(owner.cookie, "POST", "ots.updateProfile", { nodeId, fields: { intendedFunction: "secret" } });
+    const created = await rpc(owner.cookie, "POST", "ots.createAnomaly", { nodeId, anomaly: { title: "secret bug" } });
+
+    const intruder = await registerTenant(`E2E Org ${uniqueSuffix()}`);
+    expect((await rpc(intruder.cookie, "GET", "ots.documentation", { nodeId })).ok).toBe(false);
+    expect((await rpc(intruder.cookie, "POST", "ots.updateProfile", { nodeId, fields: { intendedFunction: "x" } })).ok).toBe(false);
+    expect((await rpc(intruder.cookie, "POST", "ots.deleteAnomaly", { anomalyId: created.data.id })).ok).toBe(false);
+    expect((await rpc(intruder.cookie, "GET", "ots.register", { productId: ctx.productId })).data).toEqual([]);
+
+    // And at the database level: with the intruder's tenant context set, RLS hides every
+    // one of the owner's OTS rows.
+    const appSql = new SQL(PG_APP_URL);
+    const counts = await appSql.begin(async (tx) => {
+      await tx`select set_config('app.tenant_id', ${intruder.tenantId}, true)`;
+      const [profiles] = await tx`select count(*)::int as n from ots_profiles where architecture_node_id = ${nodeId}`;
+      const [anomalies] = await tx`select count(*)::int as n from ots_anomalies where architecture_node_id = ${nodeId}`;
+      return [profiles.n, anomalies.n];
+    });
+    await appSql.close();
+    expect(counts).toEqual([0, 0]);
+  });
+});

@@ -6,7 +6,7 @@ import { trpc } from "@/lib/trpc-client";
 import { useUnsavedChangesGuard } from "@/lib/use-unsaved-changes-guard";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-type Scope = "test_case" | "test_execution" | "requirement_list";
+type Scope = "test_case" | "test_execution" | "requirement_list" | "ots_list" | "ots_component";
 
 /** The synthetic anchor's `download` attribute is what makes this a save-to-disk rather
  * than a navigation - `useUnsavedChangesGuard`'s own click listener knows to leave

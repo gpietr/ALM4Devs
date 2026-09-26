@@ -4,6 +4,7 @@ import { documentTemplatesRouter } from "./document-templates";
 import { llmRouter } from "./llm";
 import { architectureRouter } from "./architecture";
 import { membersRouter } from "./members";
+import { otsRouter } from "./ots";
 import { productsRouter } from "./products";
 import { requirementsRouter } from "./requirements";
 import { settingsRouter } from "./settings";
@@ -28,6 +29,7 @@ export const appRouter = router({
   documentTemplates: documentTemplatesRouter,
   llm: llmRouter,
   members: membersRouter,
+  ots: otsRouter,
   products: productsRouter,
   requirements: requirementsRouter,
   settings: settingsRouter,

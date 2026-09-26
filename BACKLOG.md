@@ -1602,6 +1602,38 @@ add its own coverage there rather than relying on manual `curl`/browser verifica
   detailed designs on software units; versioning/approval of architecture snapshots for
   the DHF.
 
+- [x] **9.50. OTS documentation** — per-component documentation shaped after FDA's
+  *Off-The-Shelf Software Use in Medical Devices* (2023), built on 9.49's OTS nodes,
+  versions and NVD scanning.
+
+  **Decisions.**
+  - No Basic/Enhanced switch: every field is optional and completeness is informational
+    only. The documentation level is an optional parameter on the seeded template.
+  - Structured tables, not custom fields:
+    - `ots_profiles` for the section III answers;
+    - `ots_platform_links` for "runs on", so platform versions come from the linked items;
+    - `ots_version_assessments` for per-version change impact.
+  - OTS versions gain release date, patch, upgrade designation and notes URL (immutable),
+    plus a mutable support status (`in_use`/`allowed`/`retired`).
+  - Known issues (`ots_anomalies`) are separate from CVEs:
+    - affected versions are ticked, and none ticked means all versions;
+    - "fixed in" is free text;
+    - an outcome requires a rationale;
+    - "Mark list reviewed" is its own audited action.
+  - UI wording is guidance-neutral, for non-medical teams.
+  - Out of scope: SBOM export, a risk module, linking test runs to software versions, and
+    non-OTS anomalies.
+
+  **Surface.**
+  - `packages/core/src/ots.ts` and the `ots.*` router.
+  - Documentation and Known issues tabs on OTS items.
+  - An "OTS register" view with CSV export.
+  - The `ots_list`/`ots_component` template scopes and a seeded "OTS Software
+    Documentation" template (run `db:backfill-tenant-defaults` for existing tenants).
+
+  **Verified**: typecheck clean; new unit tests (`ots.test.ts`) and e2e tests ("e2e: OTS
+  documentation"); full suite passes.
+
 - [ ] **10. Self-host packaging** — finalize `docker-compose.yml` for external users (env
   templating, first-run setup docs), confirm the three-service topology holds up outside the
   dev environment.
