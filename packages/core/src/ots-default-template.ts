@@ -111,20 +111,6 @@ ${FIELD("Links with other software, including software outside the product", "ex
   {{#each testCases}}<tr><td>{{displayId}}</td><td>{{title}}</td></tr>{{/each}}
 </table>
 {{/if}}
-{{#each versions}}{{#if assessment}}
-<div class="field">
-  <div class="label">Version {{version}} &mdash; testing and change-impact assessment{{#if assessment.assessedAt}} ({{assessment.assessedAt}}){{/if}}</div>
-  {{#with assessment}}
-  {{#if verificationSummary}}<div class="text"><em>Verification:</em> {{verificationSummary}}</div>{{/if}}
-  {{#if regressionAnalysis}}<div class="text"><em>Regression analysis:</em> {{regressionAnalysis}}</div>{{/if}}
-  <div class="text"><em>Regression testing performed:</em> {{#if regressionTestPerformed}}Yes{{else}}No{{/if}}{{#if testSetName}} (test set: {{testSetName}}){{/if}}</div>
-  {{#if safetyImpact}}<div class="text"><em>Safety impact:</em> {{safetyImpact}}</div>{{/if}}
-  {{#if designImpact}}<div class="text"><em>Design impact:</em> {{designImpact}}</div>{{/if}}
-  {{#if installationImpact}}<div class="text"><em>Installation / field impact:</em> {{installationImpact}}</div>{{/if}}
-  {{#if obsolescenceImpact}}<div class="text"><em>Obsolescence:</em> {{obsolescenceImpact}}</div>{{/if}}
-  {{/with}}
-</div>
-{{/if}}{{/each}}
 ${FIELD("Known-issue list source", "anomalyListUrl")}
 ${FIELD("Access to updates", "updatesSourceUrl")}
 <div class="field"><div class="label">Known issues</div>
@@ -185,7 +171,7 @@ ${FIELD("Retirement / replacement plan", "retirementPlan")}
     <td>
       {{#if hasChanges}}
       {{#each added}}<div>Added {{displayId}} {{title}} {{version}}</div>{{/each}}
-      {{#each changed}}<div>Changed {{displayId}} {{title}}: {{from}} &rarr; {{to}}{{#each assessments}}{{#if regressionTestPerformed}} <span class="muted">(regression tested)</span>{{/if}}{{/each}}</div>{{/each}}
+      {{#each changed}}<div>Changed {{displayId}} {{title}}: {{from}} &rarr; {{to}}</div>{{/each}}
       {{#each removed}}<div>Removed {{displayId}} {{title}} {{version}}</div>{{/each}}
       {{else}}<span class="muted">No OTS changes</span>{{/if}}
     </td>

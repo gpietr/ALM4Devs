@@ -113,7 +113,7 @@ const GROUPS: Group[] = [
   },
   {
     title: "How do you know it works?",
-    hint: "Testing evidence is the linked test cases (Details tab) and each version's assessment. The current list of known OTS bugs is the Known issues tab; record here where the vendor publishes them and where updates come from.",
+    hint: "Testing evidence is the linked test cases (Details tab). The current list of known OTS bugs is the Known issues tab; record here where the vendor publishes them and where updates come from.",
     fields: [
       {
         key: "anomalyListUrl",

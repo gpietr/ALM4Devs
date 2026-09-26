@@ -15,7 +15,7 @@ import { OtsVersionControls } from "./ots-version-controls";
 
 type Detail = inferRouterOutputs<AppRouter>["architecture"]["get"];
 
-/** Version history, new versions, scans, release tags, support status and assessment.
+/** Version history, new versions, scans, release tags, and support status.
  * Each control saves on its own. */
 export function OtsVersionsTab({ detail }: { detail: Detail }) {
   const { node, versionHistory } = detail;
@@ -221,7 +221,7 @@ export function OtsVersionsTab({ detail }: { detail: Detail }) {
                   }
                   addLabel="Applies to versions"
                 />
-                <OtsVersionControls nodeId={nodeId} productId={node.productId} versionId={v.id} supportStatus={v.supportStatus} />
+                <OtsVersionControls nodeId={nodeId} versionId={v.id} supportStatus={v.supportStatus} />
               </li>
             );
           })}

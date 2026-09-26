@@ -5054,7 +5054,7 @@ describe("e2e: OTS documentation (FDA OTS guidance)", () => {
     expect(crossProduct.error?.message).toMatch(/same product/);
   });
 
-  test("version identity fields, support status and change-impact assessment", async () => {
+  test("version identity fields and support status", async () => {
     const tenant = await registerTenant(`E2E Org ${uniqueSuffix()}`);
     const ctx = await setupOtsProduct(tenant);
     const nodeId = await createOts(tenant, ctx, "OpenSSL");
@@ -5076,19 +5076,6 @@ describe("e2e: OTS documentation (FDA OTS guidance)", () => {
 
     const allowed = await rpc(tenant.cookie, "POST", "ots.setVersionStatus", { nodeId, versionId: v.id, supportStatus: "allowed" });
     expect(allowed.ok).toBe(true);
-    let doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
-    expect(doc.data.completeness.gaps.some((g: any) => g.field === "versionAssessment")).toBe(true);
-
-    const assessed = await rpc(tenant.cookie, "POST", "ots.saveVersionAssessment", {
-      nodeId,
-      versionId: v.id,
-      fields: { regressionAnalysis: "TLS paths only", regressionTestPerformed: true },
-    });
-    expect(assessed.ok).toBe(true);
-    doc = await rpc(tenant.cookie, "GET", "ots.documentation", { nodeId });
-    expect(doc.data.versions[0].assessment.regressionAnalysis).toBe("TLS paths only");
-    expect(doc.data.versions[0].assessment.regressionTestPerformed).toBe(true);
-    expect(doc.data.completeness.gaps.some((g: any) => g.field === "versionAssessment")).toBe(false);
 
     // A version id belonging to some other OTS item is rejected.
     const otherNode = await createOts(tenant, ctx, "zlib", "1.3");

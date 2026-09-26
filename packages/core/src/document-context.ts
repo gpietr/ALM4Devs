@@ -269,19 +269,6 @@ export async function buildOtsComponentDocumentContext(db: TenantTx, tenantId: s
       supportStatus: OTS_SUPPORT_STATUS_LABELS[v.supportStatus] ?? v.supportStatus,
       recordedAt: isoDate(v.createdAt),
       shippedIn: v.softwareVersions.map((sv) => sv.versionNumber),
-      assessment: v.assessment
-        ? {
-            safetyImpact: v.assessment.safetyImpact,
-            designImpact: v.assessment.designImpact,
-            installationImpact: v.assessment.installationImpact,
-            obsolescenceImpact: v.assessment.obsolescenceImpact,
-            regressionAnalysis: v.assessment.regressionAnalysis,
-            verificationSummary: v.assessment.verificationSummary,
-            regressionTestPerformed: v.assessment.regressionTestPerformed,
-            testSetName: v.assessment.testSetName,
-            assessedAt: isoDate(v.assessment.assessedAt),
-          }
-        : null,
     })),
     platforms: doc.platforms.map((p) => ({
       displayId: p.displayId,
@@ -347,13 +334,6 @@ export async function buildOtsListDocumentContext(db: TenantTx, tenantId: string
         title: c.title,
         from: c.from,
         to: c.to,
-        assessments: c.assessments.map((a) => ({
-          version: a.version,
-          safetyImpact: a.safetyImpact,
-          regressionAnalysis: a.regressionAnalysis,
-          regressionTestPerformed: a.regressionTestPerformed,
-          verificationSummary: a.verificationSummary,
-        })),
       })),
       hasChanges: r.added.length + r.removed.length + r.changed.length > 0,
     })),

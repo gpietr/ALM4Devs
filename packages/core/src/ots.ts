@@ -343,7 +343,7 @@ export async function replaceOtsPlatformLinks(
   });
 }
 
-// --- Versions: support status + change-impact assessment ------------------------------
+// --- Versions: support status ---------------------------------------------------------
 
 export async function setArchitectureNodeVersionSupportStatus(
   db: TenantTx,
@@ -375,94 +375,6 @@ export async function setArchitectureNodeVersionSupportStatus(
     entityType: "architecture_node",
     entityId: node.id,
     payload: { displayId: node.displayId, versionId: params.versionId, version: row?.version, supportStatus: params.supportStatus },
-  });
-}
-
-export type OtsVersionAssessmentView = Omit<typeof schema.otsVersionAssessments.$inferSelect, "tenantId"> & {
-  testSetName: string | null;
-};
-
-export interface OtsVersionAssessmentInput {
-  safetyImpact?: string | null;
-  designImpact?: string | null;
-  installationImpact?: string | null;
-  obsolescenceImpact?: string | null;
-  regressionAnalysis?: string | null;
-  verificationSummary?: string | null;
-  regressionTestPerformed?: boolean;
-  testSetId?: string | null;
-}
-
-async function loadVersionAssessments(
-  db: TenantTx,
-  tenantId: string,
-  versionIds: string[],
-): Promise<Map<string, OtsVersionAssessmentView>> {
-  const map = new Map<string, OtsVersionAssessmentView>();
-  if (versionIds.length === 0) return map;
-  const rows = await db
-    .select({ assessment: schema.otsVersionAssessments, testSetName: schema.testSets.name })
-    .from(schema.otsVersionAssessments)
-    .leftJoin(schema.testSets, eq(schema.otsVersionAssessments.testSetId, schema.testSets.id))
-    .where(
-      and(
-        eq(schema.otsVersionAssessments.tenantId, tenantId),
-        inArray(schema.otsVersionAssessments.architectureNodeVersionId, versionIds),
-      ),
-    );
-  for (const { assessment, testSetName } of rows) {
-    const { tenantId: _tenantId, ...rest } = assessment;
-    map.set(assessment.architectureNodeVersionId, { ...rest, testSetName: testSetName ?? null });
-  }
-  return map;
-}
-
-/** Replace-all save of one version's change-impact assessment; re-stamps assessedBy/At. */
-export async function upsertOtsVersionAssessment(
-  db: TenantTx,
-  params: {
-    tenantId: string;
-    architectureNodeId: string;
-    versionId: string;
-    fields: OtsVersionAssessmentInput;
-    actorUserId: string;
-  },
-) {
-  const node = await getOtsNode(db, params.tenantId, params.architectureNodeId);
-  await assertVersionsBelongToNode(db, params.tenantId, node.id, [params.versionId]);
-  if (params.fields.testSetId) {
-    const [set] = await db
-      .select({ productId: schema.testSets.productId })
-      .from(schema.testSets)
-      .where(and(eq(schema.testSets.id, params.fields.testSetId), eq(schema.testSets.tenantId, params.tenantId)));
-    if (!set) throw new DomainError("test set not found");
-    if (set.productId !== node.productId) throw new DomainError("test set must belong to the same product");
-  }
-
-  const values = {
-    safetyImpact: trimOrNull(params.fields.safetyImpact),
-    designImpact: trimOrNull(params.fields.designImpact),
-    installationImpact: trimOrNull(params.fields.installationImpact),
-    obsolescenceImpact: trimOrNull(params.fields.obsolescenceImpact),
-    regressionAnalysis: trimOrNull(params.fields.regressionAnalysis),
-    verificationSummary: trimOrNull(params.fields.verificationSummary),
-    regressionTestPerformed: params.fields.regressionTestPerformed ?? false,
-    testSetId: params.fields.testSetId ?? null,
-    assessedBy: params.actorUserId,
-    assessedAt: new Date(),
-  };
-  await db
-    .insert(schema.otsVersionAssessments)
-    .values({ ...values, tenantId: params.tenantId, architectureNodeVersionId: params.versionId })
-    .onConflictDoUpdate({ target: schema.otsVersionAssessments.architectureNodeVersionId, set: values });
-
-  await writeAuditLog(db, {
-    tenantId: params.tenantId,
-    actorUserId: params.actorUserId,
-    action: "ots.version_assessed",
-    entityType: "architecture_node",
-    entityId: node.id,
-    payload: { displayId: node.displayId, versionId: params.versionId, regressionTestPerformed: values.regressionTestPerformed },
   });
 }
 
@@ -807,7 +719,6 @@ export interface OtsCompleteness {
 
 export interface OtsCompletenessInput {
   profile: OtsProfileView;
-  versions: Array<{ id: string; version: string; supportStatus: string; hasAssessment: boolean }>;
   currentVersionId: string | null;
   anomalies: Array<{ outcome: string | null }>;
   now?: Date;
@@ -839,11 +750,6 @@ export function computeOtsCompleteness(input: OtsCompletenessInput): OtsComplete
   // Consistency hints - not counted towards filled/total.
   const hint = (field: string, message: string) => gaps.push({ field, message, enhancedOnly: false });
   if (!input.currentVersionId) hint("version", "No version recorded");
-  for (const v of input.versions) {
-    if (v.supportStatus === "allowed" && !v.hasAssessment) {
-      hint("versionAssessment", `Version ${v.version} is allowed but has no change-impact/validation assessment`);
-    }
-  }
   if (!profile.anomaliesReviewedAt) {
     hint("anomaliesReviewedAt", "Known-issue list never marked as reviewed");
   } else if (now.getTime() - profile.anomaliesReviewedAt.getTime() > OTS_ANOMALY_REVIEW_STALE_DAYS * 86_400_000) {
@@ -861,7 +767,6 @@ export function computeOtsCompleteness(input: OtsCompletenessInput): OtsComplete
 // --- Full documentation for one OTS item -------------------------------------------------
 
 export type OtsVersionDocView = ArchitectureNodeVersionView & {
-  assessment: OtsVersionAssessmentView | null;
   softwareVersions: SoftwareVersionLinkView[];
 };
 
@@ -878,13 +783,9 @@ export async function getOtsDocumentation(db: TenantTx, tenantId: string, archit
     listTestCaseLinksForNode(db, tenantId, node.id),
   ]);
   const versionIds = versionRows.map((v) => v.id);
-  const [assessments, softwareVersionsByVersion] = await Promise.all([
-    loadVersionAssessments(db, tenantId, versionIds),
-    listSoftwareVersionsForEntities(db, tenantId, "architecture_node_version", versionIds),
-  ]);
+  const softwareVersionsByVersion = await listSoftwareVersionsForEntities(db, tenantId, "architecture_node_version", versionIds);
   const versions: OtsVersionDocView[] = versionRows.map((v) => ({
     ...v,
-    assessment: assessments.get(v.id) ?? null,
     softwareVersions: softwareVersionsByVersion.get(v.id) ?? [],
   }));
   const reviewer = profile.anomaliesReviewedBy
@@ -897,7 +798,6 @@ export async function getOtsDocumentation(db: TenantTx, tenantId: string, archit
     : null;
   const completeness = computeOtsCompleteness({
     profile,
-    versions: versions.map((v) => ({ id: v.id, version: v.version, supportStatus: v.supportStatus, hasAssessment: !!v.assessment })),
     currentVersionId: node.currentVersionId,
     anomalies,
   });
@@ -969,11 +869,6 @@ export async function getOtsRegister(db: TenantTx, tenantId: string, productId: 
         ),
       ),
   ]);
-  const assessments = await loadVersionAssessments(
-    db,
-    tenantId,
-    versionRows.map((v) => v.id),
-  );
 
   const profileByNode = new Map(profileRows.map((p) => [p.architectureNodeId, p]));
   const annotationByPair = new Map(annotationRows.map((a) => [`${a.architectureNodeId}:${a.cveId}`, a]));
@@ -998,7 +893,6 @@ export async function getOtsRegister(db: TenantTx, tenantId: string, productId: 
     }).length;
     const completeness = computeOtsCompleteness({
       profile,
-      versions: versions.map((v) => ({ id: v.id, version: v.version, supportStatus: v.supportStatus, hasAssessment: assessments.has(v.id) })),
       currentVersionId: node.currentVersionId,
       anomalies,
     });
@@ -1091,11 +985,9 @@ function versionLabel(versions: ReleaseComponentVersion[]): string {
 }
 
 /** Per product release (oldest first): the OTS components shipped, and what was added,
- * removed or changed since the previous release, with the new versions' assessments. */
+ * removed or changed since the previous release. */
 export async function getOtsReleaseChanges(db: TenantTx, tenantId: string, productId: string) {
   const perRelease = await loadReleaseComponents(db, tenantId, productId);
-  const changedVersionIds = perRelease.flatMap((r) => [...r.byNode.values()].flat().map((v) => v.id));
-  const assessments = await loadVersionAssessments(db, tenantId, [...new Set(changedVersionIds)]);
 
   let previous: Map<string, ReleaseComponentVersion[]> = new Map();
   return perRelease.map(({ release, nodeById, byNode }) => {
@@ -1113,21 +1005,11 @@ export async function getOtsReleaseChanges(db: TenantTx, tenantId: string, produ
         const before = previous.get(nodeId);
         return before && versionLabel(before) !== versionLabel(versions);
       })
-      .map(([nodeId, versions]) => {
-        const beforeIds = new Set(previous.get(nodeId)!.map((v) => v.id));
-        const newVersions = versions.filter((v) => !beforeIds.has(v.id));
-        return {
-          ...ref(nodeId),
-          from: versionLabel(previous.get(nodeId)!),
-          to: versionLabel(versions),
-          assessments: newVersions
-            .map((v) => {
-              const a = assessments.get(v.id);
-              return a ? { version: v.version, ...a } : null;
-            })
-            .filter((a): a is NonNullable<typeof a> => a !== null),
-        };
-      });
+      .map(([nodeId, versions]) => ({
+        ...ref(nodeId),
+        from: versionLabel(previous.get(nodeId)!),
+        to: versionLabel(versions),
+      }));
     previous = byNode;
     return {
       release: {

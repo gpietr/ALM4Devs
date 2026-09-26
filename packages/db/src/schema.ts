@@ -1165,30 +1165,6 @@ export const otsAnomalyRequirementLinks = pgTable(
   (t) => [primaryKey({ columns: [t.anomalyId, t.requirementId] })],
 );
 
-// Change-impact assessment of one recorded OTS version (guidance Appendix A, plus
-// regression analysis). Separate from the immutable version row because it's written
-// and revised after the version is recorded.
-export const otsVersionAssessments = pgTable("ots_version_assessments", {
-  architectureNodeVersionId: uuid("architecture_node_version_id")
-    .primaryKey()
-    .references(() => architectureNodeVersions.id, { onDelete: "cascade" }),
-  tenantId: uuid("tenant_id")
-    .notNull()
-    .references(() => tenants.id, { onDelete: "cascade" }),
-  safetyImpact: text("safety_impact"),
-  designImpact: text("design_impact"),
-  installationImpact: text("installation_impact"),
-  obsolescenceImpact: text("obsolescence_impact"),
-  regressionAnalysis: text("regression_analysis"),
-  verificationSummary: text("verification_summary"),
-  regressionTestPerformed: boolean("regression_test_performed").notNull().default(false),
-  testSetId: uuid("test_set_id").references(() => testSets.id, { onDelete: "set null" }),
-  assessedBy: text("assessed_by")
-    .notNull()
-    .references(() => user.id),
-  assessedAt: timestamp("assessed_at", { withTimezone: true }).defaultNow().notNull(),
-});
-
 // --- Software versions (release train) ----------------------------------------------
 // A product's own releases ("v1.0", "v1.1", ...) - distinct from requirementVersions/
 // architectureNodeVersions, which track revisions of one item's *content*, not the

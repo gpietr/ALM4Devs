@@ -1,0 +1,1 @@
+DROP TABLE "ots_version_assessments" CASCADE;

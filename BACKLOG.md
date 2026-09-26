@@ -1611,8 +1611,8 @@ add its own coverage there rather than relying on manual `curl`/browser verifica
     only. The documentation level is an optional parameter on the seeded template.
   - Structured tables, not custom fields:
     - `ots_profiles` for the section III answers;
-    - `ots_platform_links` for "runs on", so platform versions come from the linked items;
-    - `ots_version_assessments` for per-version change impact.
+    - `ots_platform_links` for "runs on", so platform versions come from the linked items.
+    - (Per-version change-impact assessments were dropped as overkill.)
   - OTS versions gain release date, patch, upgrade designation and notes URL (immutable),
     plus a mutable support status (`in_use`/`allowed`/`retired`).
   - Known issues (`ots_anomalies`) are separate from CVEs:

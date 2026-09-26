@@ -98,12 +98,15 @@ export function SoftwareVersionLinkList({
   onChange,
   emptyMessage = "No versions defined for this product yet.",
   addLabel = "Applies to versions",
+  noneLinkedLabel = "No versions linked",
 }: {
   options: SoftwareVersionOption[]
   value: string[]
   onChange: (ids: string[]) => void
   emptyMessage?: string
   addLabel?: string
+  /** Shown beside the plus while nothing is linked, so a lone icon isn't the only cue. */
+  noneLinkedLabel?: string
 }) {
   const optionsById = React.useMemo(() => new Map(options.map((o) => [o.id, o])), [options])
   const items = React.useMemo(
@@ -127,9 +130,16 @@ export function SoftwareVersionLinkList({
             </ComboboxChip>
           )
         })}
-        <ComboboxTrigger aria-label={addLabel}>
-          <Plus />
-        </ComboboxTrigger>
+        {value.length === 0 ? (
+          <ComboboxTrigger aria-label={addLabel} className="w-auto gap-1 px-1.5 text-xs">
+            <Plus />
+            {noneLinkedLabel}
+          </ComboboxTrigger>
+        ) : (
+          <ComboboxTrigger aria-label={addLabel}>
+            <Plus />
+          </ComboboxTrigger>
+        )}
       </ComboboxChips>
 
       <ComboboxPortal>

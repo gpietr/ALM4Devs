@@ -17,7 +17,6 @@ import {
   setArchitectureNodeVersionSupportStatus,
   updateOtsAnomaly,
   upsertOtsProfile,
-  upsertOtsVersionAssessment,
 } from "@galm/core";
 import { withTenant } from "@galm/db";
 import { GithubApiError, githubIssueExternalId, parseGithubIssuesUrl } from "@galm/integrations-github";
@@ -144,38 +143,6 @@ export const otsRouter = router({
           architectureNodeId: input.nodeId,
           versionId: input.versionId,
           supportStatus: input.supportStatus,
-          actorUserId: userId,
-        }),
-      ).catch(toBadRequest);
-      return { ok: true };
-    }),
-
-  saveVersionAssessment: protectedProcedure
-    .input(
-      z.object({
-        nodeId: z.string().uuid(),
-        versionId: z.string().uuid(),
-        fields: z.object({
-          safetyImpact: longText,
-          designImpact: longText,
-          installationImpact: longText,
-          obsolescenceImpact: longText,
-          regressionAnalysis: longText,
-          verificationSummary: longText,
-          regressionTestPerformed: z.boolean().optional(),
-          testSetId: z.string().uuid().nullable().optional(),
-        }),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const tenantId = tenantOf(ctx);
-      const userId = userIdOf(ctx);
-      await withTenant(db, tenantId, (tx) =>
-        upsertOtsVersionAssessment(tx, {
-          tenantId,
-          architectureNodeId: input.nodeId,
-          versionId: input.versionId,
-          fields: input.fields,
           actorUserId: userId,
         }),
       ).catch(toBadRequest);

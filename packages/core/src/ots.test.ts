@@ -23,11 +23,10 @@ function fullProfile(overrides: Partial<OtsProfileView> = {}): OtsProfileView {
 }
 
 const NOW = new Date("2026-09-24");
-const currentVersion = { id: "v1", version: "1.0", supportStatus: "in_use", hasAssessment: false };
 
 describe("computeOtsCompleteness", () => {
   test("an empty profile is valid and simply reports every counted field as a gap", () => {
-    const result = computeOtsCompleteness({ profile: profile(), versions: [], currentVersionId: null, anomalies: [], now: NOW });
+    const result = computeOtsCompleteness({ profile: profile(), currentVersionId: null, anomalies: [], now: NOW });
     expect(result.filled).toBe(0);
     const counted = OTS_PROFILE_TEXT_FIELDS.filter(
       (f) => !("counted" in f && f.counted === false) && !("enhancedOnly" in f && f.enhancedOnly),
@@ -39,7 +38,6 @@ describe("computeOtsCompleteness", () => {
   test("assurance-section gaps are flagged enhancedOnly and excluded from filled/total", () => {
     const result = computeOtsCompleteness({
       profile: fullProfile({ developmentAssurance: null, supportMechanism: null }),
-      versions: [currentVersion],
       currentVersionId: "v1",
       anomalies: [],
       now: NOW,
@@ -53,7 +51,6 @@ describe("computeOtsCompleteness", () => {
   test("fields marked counted: false never show up as gaps", () => {
     const result = computeOtsCompleteness({
       profile: fullProfile({ hostingEnvironment: null, masterFileNumber: null, updatesSourceUrl: null, retirementPlan: null }),
-      versions: [currentVersion],
       currentVersionId: "v1",
       anomalies: [],
       now: NOW,
@@ -61,30 +58,9 @@ describe("computeOtsCompleteness", () => {
     expect(result.gaps).toEqual([]);
   });
 
-  test("an allowed version without an assessment is reported", () => {
-    const result = computeOtsCompleteness({
-      profile: fullProfile(),
-      versions: [{ ...currentVersion, supportStatus: "allowed" }],
-      currentVersionId: "v1",
-      anomalies: [],
-      now: NOW,
-    });
-    expect(result.gaps.map((g) => g.field)).toEqual(["versionAssessment"]);
-    expect(
-      computeOtsCompleteness({
-        profile: fullProfile(),
-        versions: [{ ...currentVersion, supportStatus: "allowed", hasAssessment: true }],
-        currentVersionId: "v1",
-        anomalies: [],
-        now: NOW,
-      }).gaps,
-    ).toEqual([]);
-  });
-
   test("anomaly review: never reviewed, and stale after the threshold", () => {
     const never = computeOtsCompleteness({
       profile: fullProfile({ anomaliesReviewedAt: null }),
-      versions: [currentVersion],
       currentVersionId: "v1",
       anomalies: [],
       now: NOW,
@@ -93,7 +69,6 @@ describe("computeOtsCompleteness", () => {
 
     const stale = computeOtsCompleteness({
       profile: fullProfile({ anomaliesReviewedAt: new Date("2026-01-01") }),
-      versions: [currentVersion],
       currentVersionId: "v1",
       anomalies: [],
       now: NOW,
@@ -105,7 +80,6 @@ describe("computeOtsCompleteness", () => {
   test("unassessed anomalies are counted", () => {
     const result = computeOtsCompleteness({
       profile: fullProfile(),
-      versions: [currentVersion],
       currentVersionId: "v1",
       anomalies: [{ outcome: null }, { outcome: "acceptable" }, { outcome: null }],
       now: NOW,
@@ -116,7 +90,6 @@ describe("computeOtsCompleteness", () => {
   test("vendor support already ended without a retirement plan is reported", () => {
     const withoutPlan = computeOtsCompleteness({
       profile: fullProfile({ endOfSupportDate: new Date("2026-01-01"), retirementPlan: null }),
-      versions: [currentVersion],
       currentVersionId: "v1",
       anomalies: [],
       now: NOW,

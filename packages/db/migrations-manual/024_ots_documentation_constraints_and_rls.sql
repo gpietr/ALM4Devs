@@ -55,8 +55,3 @@ alter table ots_anomaly_requirement_links enable row level security;
 drop policy if exists tenant_isolation on ots_anomaly_requirement_links;
 create policy tenant_isolation on ots_anomaly_requirement_links
   using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
-
-alter table ots_version_assessments enable row level security;
-drop policy if exists tenant_isolation on ots_version_assessments;
-create policy tenant_isolation on ots_version_assessments
-  using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
